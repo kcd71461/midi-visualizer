@@ -38,6 +38,15 @@ function getNoteHitCallback() {
   };
 }
 
+function handleSelectFile() {
+  if (state.current === AppState.PLAYING) {
+    pausePlayback();
+    setState(AppState.PAUSED);
+  }
+  showProgressBar(false);
+  showFileOverlay(true);
+}
+
 async function handleFileLoaded(source) {
   try {
     setState(AppState.LOADING);
@@ -139,6 +148,7 @@ function init() {
   // UI 컨트롤
   createControls(state, {
     onPlayPause: togglePlayPause,
+    onSelectFile: handleSelectFile,
     onSpeedChange: (speed) => setPlaybackSpeed(speed),
     onMuteToggle: (muted) => setMuted(muted),
     onVolumeChange: (vol) => setVolume(vol),

@@ -94,8 +94,10 @@ export function seekTo(seconds) {
   if (wasPlaying) Tone.Transport.start();
 }
 
+const BASE_BPM = 120;
+
 export function setPlaybackSpeed(rate) {
-  Tone.Transport.playbackRate = rate;
+  Tone.Transport.bpm.value = BASE_BPM * rate;
 }
 
 export function setMuted(muted) {

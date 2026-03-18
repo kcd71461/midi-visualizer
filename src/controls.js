@@ -8,8 +8,12 @@ export function createControls(state, callbacks) {
   gui = new GUI({ title: '🎹 MIDI Visualizer' });
 
   const playback = gui.addFolder('재생');
-  const playObj = { '재생/일시정지': () => callbacks.onPlayPause() };
+  const playObj = {
+    '재생/일시정지': () => callbacks.onPlayPause(),
+    '곡 선택': () => callbacks.onSelectFile(),
+  };
   playback.add(playObj, '재생/일시정지');
+  playback.add(playObj, '곡 선택');
   playback.add(state, 'playbackSpeed', 0.25, 2.0, 0.25).name('속도').onChange(callbacks.onSpeedChange);
   playback.open();
 
