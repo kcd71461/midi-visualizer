@@ -8,7 +8,7 @@ export const PIANO = {
   BLACK_KEY_WIDTH: 0.14,
   BLACK_KEY_HEIGHT: 0.25,
   BLACK_KEY_DEPTH: 1.0,
-  KEY_GAP: 0.02,
+  KEY_GAP: 0.04,
 };
 
 // 노트 블록 설정
