@@ -28,24 +28,23 @@ function createBlackKeyMaterial(keyIndex) {
   return new THREE.MeshPhysicalMaterial({
     color,
     roughness,
-    metalness: 0.08,
-    reflectivity: 0.9,
+    metalness: 0.1,
+    reflectivity: 1.0,
     clearcoat: 1.0,
     clearcoatRoughness: 0.03 + Math.random() * 0.04,
-    // 환경광 차단 시뮬레이션 — 건반 접촉부를 어둡게
-    envMapIntensity: 0.5,
+    envMapIntensity: 1.0,
   });
 }
 
 function createWhiteKeyMaterial() {
   return new THREE.MeshPhysicalMaterial({
-    color: 0xfafafa,
-    roughness: 0.15,
-    metalness: 0.05,
-    reflectivity: 0.8,
-    clearcoat: 0.6,
-    clearcoatRoughness: 0.2,
-    envMapIntensity: 0.6,
+    color: 0xffffff,
+    roughness: 0.1,
+    metalness: 0.02,
+    reflectivity: 0.9,
+    clearcoat: 0.8,
+    clearcoatRoughness: 0.1,
+    envMapIntensity: 1.2,
   });
 }
 
