@@ -20,6 +20,7 @@
     "@storybook/addon-essentials": "^8.6.14",
     "@storybook/html": "^8.6.18",
     "@storybook/html-vite": "^8.6.18",
+    "puppeteer": "^24.39.1",
     "storybook": "^8.6.18",
     "vite": "^8.0.0"
   }

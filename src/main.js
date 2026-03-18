@@ -1,20 +1,24 @@
 import * as THREE from 'three';
-import { AppState, TRACK_COLORS } from './constants.js';
-import { createScene, setupPostProcessing, updateScene, renderScene, handleResize, getScene } from './scene.js';
-import { createPiano, pressKey } from './piano.js';
-import { createNoteBlocks, updateNotePositions, setTrackVisible, setTrackColor, disposeNotes } from './notes.js';
+import { AppState, TRACK_COLORS, PIANO } from './constants.js';
+import { createScene, setupPostProcessing, updateScene, renderScene, handleResize, updateDynamicBloom } from './scene.js';
+import { createPiano, pressKey, getKeyX } from './piano.js';
+import { createNoteBlocks, updateNotePositions, setTrackVisible, setTrackColor, disposeNotes, setHitPoint, getHitPoint } from './notes.js';
 import { loadMidiFromUrl, loadMidiFromFile } from './midi-parser.js';
 import {
-  loadSampler, scheduleNotes, clearSchedule,
-  startPlayback, pausePlayback, stopPlayback, seekTo,
-  setPlaybackSpeed, setMuted, setVolume, getCurrentTime, disposeAudio
+  loadSampler, loadNotes, tickAudio, resetScheduleIndex,
+  startAudioContext, releaseAll, setMuted, setVolume, disposeAudio
 } from './audio.js';
-import { setupCamera, updateCamera, setFreeMode, applyPreset } from './camera.js';
+import { setupCamera, updateCamera, setFreeMode, applyPreset, setCinematicMode, updateCinematicCamera, isCinematicMode as getCinematicCameraMode, startOutroAtTime, isOutroPlaying } from './camera.js';
+import { createParticles, emitHitParticles, emitHitWave, updateParticles } from './particles.js';
 import {
   createControls, createTrackControls, setupFileUI,
   updateProgressBar, setupProgressBar,
   showFileOverlay, showLoadingOverlay, showProgressBar
 } from './controls.js';
+import { PlaybackClock } from './playback-clock.js';
+
+// 시네마틱 프레젠테이션 모드 감지
+const isCinematicMode = new URLSearchParams(window.location.search).has('cinematic');
 
 const state = {
   current: AppState.IDLE,
@@ -25,22 +29,40 @@ const state = {
 };
 
 let camera, scene;
-const clock = new THREE.Clock();
+const clock = new PlaybackClock();
+const sceneClock = new THREE.Clock();
 
 function setState(newState) {
   state.current = newState;
+}
+
+function showCinematicTitle(title) {
+  const el = document.getElementById('cinematic-title');
+  if (!el) return;
+  el.innerHTML = `${title}<span class="subtitle">3D MIDI Visualizer</span>`;
+  el.classList.add('visible');
+  setTimeout(() => el.classList.remove('visible'), 5000);
 }
 
 function getNoteHitCallback() {
   return (midiNote, trackIndex, velocity) => {
     const color = state.midiData?.tracks[trackIndex]?.color || 0xffffff;
     pressKey(midiNote, color);
+    // 건반 히트 파티클
+    const x = getKeyX(midiNote);
+    emitHitParticles(x, 0.2, 0.75, color, velocity);
+    // 히트 웨이브
+    const hitZ = getHitPoint() === 'front'
+      ? PIANO.WHITE_KEY_DEPTH / 2
+      : -PIANO.WHITE_KEY_DEPTH / 2;
+    emitHitWave(x, hitZ, color);
   };
 }
 
 function handleSelectFile() {
   if (state.current === AppState.PLAYING) {
-    pausePlayback();
+    clock.pause();
+    releaseAll();
     setState(AppState.PAUSED);
   }
   showProgressBar(false);
@@ -56,6 +78,7 @@ async function handleFileLoaded(source) {
 
     // 기존 리소스 정리
     if (state.midiData) {
+      clock.stop();
       disposeNotes(scene);
       disposeAudio();
     }
@@ -87,17 +110,17 @@ async function handleFileLoaded(source) {
     // 노트 블록 생성
     createNoteBlocks(scene, midiData);
 
-    // 오디오 스케줄링
-    scheduleNotes(midiData, getNoteHitCallback());
+    // 오디오 노트 로딩 (롤링 스케줄러용)
+    loadNotes(midiData, getNoteHitCallback());
 
-    // 트랙 컨트롤 UI 생성
-    createTrackControls(midiData, {
+    // 트랙 컨트롤 UI 생성 (일반 모드만)
+    if (!isCinematicMode) createTrackControls(midiData, {
       onTrackVisibility: (index, visible) => {
         midiData.tracks[index].visible = visible;
         setTrackVisible(index, visible);
-        // 오디오도 재스케줄링
-        clearSchedule();
-        scheduleNotes(midiData, getNoteHitCallback());
+        // 오디오도 재로딩
+        loadNotes(midiData, getNoteHitCallback());
+        resetScheduleIndex(clock.now());
       },
       onTrackColor: (index, color) => {
         midiData.tracks[index].color = color;
@@ -106,7 +129,7 @@ async function handleFileLoaded(source) {
     });
 
     showLoadingOverlay(false);
-    showProgressBar(true);
+    if (!isCinematicMode) showProgressBar(true);
     setState(AppState.READY);
 
   } catch (err) {
@@ -118,12 +141,14 @@ async function handleFileLoaded(source) {
   }
 }
 
-function togglePlayPause() {
+async function togglePlayPause() {
   if (state.current === AppState.READY || state.current === AppState.PAUSED) {
-    startPlayback();
+    await startAudioContext();
+    clock.play();
     setState(AppState.PLAYING);
   } else if (state.current === AppState.PLAYING) {
-    pausePlayback();
+    clock.pause();
+    releaseAll();
     setState(AppState.PAUSED);
   }
 }
@@ -141,35 +166,64 @@ function init() {
   setupPostProcessing(camera);
   setupCamera(camera, sceneResult.renderer.domElement);
   createPiano(scene);
+  createParticles(scene);
 
   // 리사이즈
   window.addEventListener('resize', () => handleResize(camera, container));
 
-  // UI 컨트롤
-  createControls(state, {
-    onPlayPause: togglePlayPause,
-    onSelectFile: handleSelectFile,
-    onSpeedChange: (speed) => setPlaybackSpeed(speed),
-    onMuteToggle: (muted) => setMuted(muted),
-    onVolumeChange: (vol) => setVolume(vol),
-    onCameraMode: (free) => setFreeMode(free),
-    onCameraPreset: (preset) => applyPreset(preset),
-  });
+  if (isCinematicMode) {
+    // 시네마틱 모드: 모든 UI 숨기고 자동 재생
+    showFileOverlay(false);
+    showProgressBar(false);
+    showLoadingOverlay(false);
 
-  // 파일 선택 UI
-  setupFileUI(handleFileLoaded);
+    // 자동으로 첫 번째 샘플 로드 후 재생
+    const defaultMidi = 'midi/chopin-nocturne-op9-no2.mid';
+    // 시네마틱 카메라 활성화
+    setCinematicMode(true);
 
-  // 프로그레스 바 탐색
-  setupProgressBar((ratio) => {
-    if (state.midiData) {
-      seekTo(ratio * state.midiData.duration);
-    }
-  });
+    handleFileLoaded({ type: 'url', url: defaultMidi }).then(() => {
+      if (state.midiData) {
+        showCinematicTitle(state.midiData.name || 'Chopin Nocturne Op.9 No.2');
+      }
+      // 3초 후 자동 재생 시작 (인트로 시퀀스 대기)
+      setTimeout(() => togglePlayPause(), 3000);
+    });
 
-  // 키보드 단축키
+  } else {
+    // 일반 모드: 기존 UI 유지
+    createControls(state, {
+      onPlayPause: togglePlayPause,
+      onSelectFile: handleSelectFile,
+      onSpeedChange: (speed) => clock.setRate(speed),
+      onHitPoint: (point) => setHitPoint(point),
+      onMuteToggle: (muted) => setMuted(muted),
+      onVolumeChange: (vol) => setVolume(vol),
+      onCameraMode: (free) => setFreeMode(free),
+      onCameraPreset: (preset) => applyPreset(preset),
+    });
+
+    setupFileUI(handleFileLoaded);
+
+    setupProgressBar((ratio) => {
+      if (state.midiData) {
+        const targetTime = ratio * state.midiData.duration;
+        clock.seek(targetTime);
+        resetScheduleIndex(targetTime);
+        releaseAll();
+      }
+    });
+  }
+
+  // 키보드 단축키 (두 모드 모두)
   window.addEventListener('keydown', (e) => {
     if (e.code === 'Space') { e.preventDefault(); togglePlayPause(); }
     if (e.code === 'KeyM') { state.muted = !state.muted; setMuted(state.muted); }
+    // F11: 시네마틱 모드 전환
+    if (e.code === 'F11' && !isCinematicMode) {
+      e.preventDefault();
+      window.location.href = window.location.pathname + '?cinematic';
+    }
   });
 
   // 초기 볼륨 설정
@@ -181,23 +235,62 @@ function init() {
 
 function animate() {
   requestAnimationFrame(animate);
-  const delta = clock.getDelta();
+  const delta = sceneClock.getDelta();
 
   updateScene(delta);
-  updateCamera();
+  updateParticles(delta);
 
-  if (state.current === AppState.PLAYING || state.current === AppState.PAUSED) {
-    const t = getCurrentTime();
+  if (state.current === AppState.PLAYING) {
+    const t = clock.now();
+    tickAudio(clock);
     updateNotePositions(t);
+
+    // 음악 에너지 계산 (시네마틱 카메라용)
+    let musicEnergy = 0;
+    if (state.midiData) {
+      let activeCount = 0;
+      state.midiData.tracks.forEach(track => {
+        if (!track.visible) return;
+        track.notes.forEach(note => {
+          if (note.time <= t && note.time + note.duration >= t) activeCount++;
+        });
+      });
+      musicEnergy = Math.min(activeCount / 15, 1.0);
+    }
+
+    // 다이나믹 블룸 업데이트
+    updateDynamicBloom(musicEnergy);
+
+    // 카메라 업데이트
+    if (getCinematicCameraMode()) {
+      updateCinematicCamera(t, musicEnergy);
+    } else {
+      updateCamera();
+    }
+
     if (state.midiData) {
       updateProgressBar(t, state.midiData.duration);
     }
 
+    // 아웃트로 시퀀스: 곡 종료 3초 전 시작
+    if (state.midiData && t >= state.midiData.duration - 3 && !isOutroPlaying()) {
+      startOutroAtTime(t);
+    }
+
     // 재생 완료 체크
-    if (state.current === AppState.PLAYING && state.midiData && t >= state.midiData.duration) {
-      stopPlayback();
+    if (state.midiData && t >= state.midiData.duration) {
+      clock.stop();
+      releaseAll();
       setState(AppState.READY);
     }
+  } else if (state.current === AppState.PAUSED || state.current === AppState.READY) {
+    updateNotePositions(clock.now());
+    updateCamera();
+    if (state.midiData) {
+      updateProgressBar(clock.now(), state.midiData.duration);
+    }
+  } else {
+    updateCamera();
   }
 
   renderScene();

@@ -78,6 +78,32 @@
       color: rgba(255, 255, 255, 0.7);
       font-family: monospace; font-size: 0.75rem;
     }
+
+    /* 시네마틱 자막 */
+    #cinematic-title {
+      position: fixed;
+      bottom: 10%;
+      left: 0; right: 0;
+      text-align: center;
+      font-family: 'Georgia', 'Times New Roman', serif;
+      font-size: 2rem;
+      font-weight: 300;
+      letter-spacing: 6px;
+      color: rgba(255, 255, 255, 0.9);
+      text-shadow: 0 0 30px rgba(78, 205, 196, 0.4), 0 0 60px rgba(167, 139, 250, 0.2);
+      opacity: 0;
+      transition: opacity 2s ease;
+      pointer-events: none;
+      z-index: 40;
+    }
+    #cinematic-title.visible { opacity: 1; }
+    #cinematic-title .subtitle {
+      display: block;
+      font-size: 0.9rem;
+      letter-spacing: 3px;
+      margin-top: 8px;
+      color: rgba(255, 255, 255, 0.5);
+    }
   </style>
 </head>
 <body>
@@ -116,6 +142,8 @@
       </button>
     </div>
   </div>
+
+  <div id="cinematic-title"></div>
 
   <div id="progress-bar-container" class="hidden">
     <div id="progress-bar"></div>

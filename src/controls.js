@@ -22,6 +22,15 @@ export function createControls(state, callbacks) {
   audio.add(state, 'volume', 0, 100, 1).name('볼륨').onChange(callbacks.onVolumeChange);
   audio.open();
 
+  const visual = gui.addFolder('비주얼');
+  const visualObj = {
+    hitPoint: '앞쪽',
+  };
+  visual.add(visualObj, 'hitPoint', ['앞쪽', '뒤쪽']).name('히트 포인트').onChange(v => {
+    callbacks.onHitPoint(v === '앞쪽' ? 'front' : 'back');
+  });
+  visual.open();
+
   const cam = gui.addFolder('카메라');
   const camObj = {
     freeMode: false,

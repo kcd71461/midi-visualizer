@@ -1,10 +1,13 @@
 import * as Tone from 'tone';
+import { AUDIO } from './constants.js';
 
 let sampler = null;
-let scheduledEvents = [];
 let isLoaded = false;
-let lastMidiData = null;
-let lastNoteHitCallback = null;
+
+// 롤링 스케줄러 상태
+let allNotes = [];       // 시간순 정렬된 flat 노트 배열
+let scheduleIndex = 0;   // 다음 스케줄할 노트의 인덱스
+let noteHitCallback = null;
 
 const SOUNDFONT_URL = 'https://tonejs.github.io/audio/salamander/';
 
@@ -34,70 +37,96 @@ export async function loadSampler() {
   });
 }
 
-export function scheduleNotes(midiData, onNoteHit) {
-  clearSchedule();
-  lastMidiData = midiData;
-  lastNoteHitCallback = onNoteHit;
+/**
+ * 전체 노트를 시간순 flat 배열로 저장하고 커서를 초기화
+ */
+export function loadNotes(midiData, onNoteHit) {
+  allNotes = [];
+  noteHitCallback = onNoteHit;
 
   midiData.tracks.forEach((track, trackIndex) => {
     if (!track.visible) return;
-
     track.notes.forEach(note => {
-      const eventId = Tone.Transport.schedule((time) => {
-        if (sampler && isLoaded) {
-          sampler.triggerAttackRelease(
-            Tone.Frequency(note.midi, 'midi').toNote(),
-            note.duration,
-            time,
-            note.velocity
-          );
-        }
-        Tone.Draw.schedule(() => {
-          if (onNoteHit) onNoteHit(note.midi, trackIndex, note.velocity);
-        }, time);
-      }, note.time);
-
-      scheduledEvents.push(eventId);
+      allNotes.push({
+        time: note.time,
+        duration: note.duration,
+        midi: note.midi,
+        velocity: note.velocity,
+        trackIndex,
+      });
     });
   });
+
+  // 시간순 정렬
+  allNotes.sort((a, b) => a.time - b.time);
+  scheduleIndex = 0;
 }
 
-export function clearSchedule() {
-  scheduledEvents.forEach(id => Tone.Transport.clear(id));
-  scheduledEvents = [];
-}
+/**
+ * 매 프레임 호출 — lookahead 윈도우 내 노트를 Web Audio에 직접 스케줄링
+ */
+export function tickAudio(clock) {
+  if (!sampler || !isLoaded || allNotes.length === 0) return;
 
-export async function startPlayback() {
-  await Tone.start();
-  Tone.Transport.start();
-}
+  const logicalNow = clock.now();
+  const rate = clock.getRate();
+  // 논리적 시간 기준 lookahead 범위
+  const horizon = logicalNow + AUDIO.SCHEDULE_AHEAD * rate;
+  const audioNow = Tone.getContext().currentTime;
 
-export function pausePlayback() {
-  Tone.Transport.pause();
-}
+  while (scheduleIndex < allNotes.length) {
+    const note = allNotes[scheduleIndex];
 
-export function stopPlayback() {
-  Tone.Transport.stop();
-  Tone.Transport.position = 0;
-}
+    if (note.time > horizon) break; // 아직 스케줄할 시간 아님
+    if (note.time < logicalNow) {
+      // 이미 지나간 노트 — 스킵
+      scheduleIndex++;
+      continue;
+    }
 
-export function seekTo(seconds) {
-  const wasPlaying = Tone.Transport.state === 'started';
-  Tone.Transport.pause();
-  Tone.Transport.seconds = seconds;
+    // 논리적 시간 → Web Audio 시간 변환
+    const deltaWall = (note.time - logicalNow) / rate;
+    const audioTime = audioNow + deltaWall;
 
-  if (lastMidiData && lastNoteHitCallback) {
-    clearSchedule();
-    scheduleNotes(lastMidiData, lastNoteHitCallback);
+    // 오디오 재생
+    const noteName = Tone.Frequency(note.midi, 'midi').toNote();
+    const audioDuration = note.duration / rate;
+    sampler.triggerAttackRelease(noteName, audioDuration, audioTime, note.velocity);
+
+    // 시각적 콜백 (건반 눌림 효과)
+    if (noteHitCallback) {
+      const cb = noteHitCallback;
+      const { midi, trackIndex, velocity } = note;
+      Tone.Draw.schedule(() => {
+        cb(midi, trackIndex, velocity);
+      }, audioTime);
+    }
+
+    scheduleIndex++;
   }
-
-  if (wasPlaying) Tone.Transport.start();
 }
 
-const BASE_BPM = 120;
+/**
+ * seek 시 이진탐색으로 커서 위치 재설정
+ */
+export function resetScheduleIndex(musicalTime) {
+  if (sampler) sampler.releaseAll();
 
-export function setPlaybackSpeed(rate) {
-  Tone.Transport.bpm.value = BASE_BPM * rate;
+  let lo = 0, hi = allNotes.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (allNotes[mid].time < musicalTime) lo = mid + 1;
+    else hi = mid;
+  }
+  scheduleIndex = lo;
+}
+
+export async function startAudioContext() {
+  await Tone.start();
+}
+
+export function releaseAll() {
+  if (sampler) sampler.releaseAll();
 }
 
 export function setMuted(muted) {
@@ -109,16 +138,9 @@ export function setVolume(value) {
   Tone.Destination.volume.value = db;
 }
 
-export function getCurrentTime() {
-  return Tone.Transport.seconds;
-}
-
-export function getTransportState() {
-  return Tone.Transport.state;
-}
-
 export function disposeAudio() {
-  clearSchedule();
-  Tone.Transport.stop();
-  Tone.Transport.cancel();
+  allNotes = [];
+  scheduleIndex = 0;
+  noteHitCallback = null;
+  if (sampler) sampler.releaseAll();
 }

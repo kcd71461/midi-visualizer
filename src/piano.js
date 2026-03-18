@@ -6,6 +6,9 @@ const activeKeys = {};
 const keyXLookup = {};
 const keyWidthLookup = {};
 
+// 활성 애니메이션 관리 맵 (중복 입력 처리)
+const activeAnimations = new Map();
+
 function isWhiteKey(midiNote) {
   const n = midiNote % 12;
   return [0, 2, 4, 5, 7, 9, 11].includes(n);
@@ -110,22 +113,84 @@ export function getKeyX(midiNote) {
   return keyXLookup[midiNote] ?? 0;
 }
 
+// --- 이징 함수 ---
+// 빠르게 하강: easeOutCubic (처음 빠르고 끝에서 감속)
+function easeOutCubic(t) {
+  return 1 - Math.pow(1 - t, 3);
+}
+
+// 부드러운 복귀: easeInOutCubic (시작과 끝 모두 부드럽게)
+function easeInOutCubic(t) {
+  return t < 0.5
+    ? 4 * t * t * t
+    : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
+
 export function pressKey(midiNote, color) {
   const key = keys.find(k => k.midiNote === midiNote);
   if (!key) return;
 
-  if (activeKeys[midiNote]) clearTimeout(activeKeys[midiNote]);
+  // 기존 애니메이션이 있으면 취소
+  if (activeAnimations.has(midiNote)) {
+    cancelAnimationFrame(activeAnimations.get(midiNote));
+    activeAnimations.delete(midiNote);
+  }
 
-  key.mesh.position.y = key.baseY - 0.1;
+  const PRESS_DURATION = 100;   // 하강 시간 (ms)
+  const RELEASE_DURATION = 400; // 복귀 시간 (ms)
+  const PRESS_DEPTH = 0.1;      // 하강 깊이
+
+  // emissive 색상 설정
   key.mesh.material.emissive.setHex(color);
-  key.mesh.material.emissiveIntensity = 1.5;
 
-  activeKeys[midiNote] = setTimeout(() => {
-    key.mesh.position.y = key.baseY;
-    key.mesh.material.emissive.setHex(0x000000);
-    key.mesh.material.emissiveIntensity = 0;
-    delete activeKeys[midiNote];
-  }, 300);
+  let startTime = null;
+
+  // --- 하강 애니메이션 (easeOutCubic) ---
+  function animatePress(timestamp) {
+    if (!startTime) startTime = timestamp;
+    const elapsed = timestamp - startTime;
+    const progress = Math.min(elapsed / PRESS_DURATION, 1);
+    const eased = easeOutCubic(progress);
+
+    // 위치 하강
+    key.mesh.position.y = key.baseY - PRESS_DEPTH * eased;
+    // emissive 강도 증가
+    key.mesh.material.emissiveIntensity = 1.5 * eased;
+
+    if (progress < 1) {
+      activeAnimations.set(midiNote, requestAnimationFrame(animatePress));
+    } else {
+      // 하강 완료 → 복귀 애니메이션 시작
+      startTime = null;
+      activeAnimations.set(midiNote, requestAnimationFrame(animateRelease));
+    }
+  }
+
+  // --- 복귀 애니메이션 (easeInOutCubic) ---
+  function animateRelease(timestamp) {
+    if (!startTime) startTime = timestamp;
+    const elapsed = timestamp - startTime;
+    const progress = Math.min(elapsed / RELEASE_DURATION, 1);
+    const eased = easeInOutCubic(progress);
+
+    // 위치 복귀 (하강 상태 → 원래 위치)
+    key.mesh.position.y = key.baseY - PRESS_DEPTH * (1 - eased);
+    // emissive 글로우 부드럽게 페이드아웃
+    key.mesh.material.emissiveIntensity = 1.5 * (1 - eased);
+
+    if (progress < 1) {
+      activeAnimations.set(midiNote, requestAnimationFrame(animateRelease));
+    } else {
+      // 애니메이션 완료 → 깔끔하게 리셋
+      key.mesh.position.y = key.baseY;
+      key.mesh.material.emissive.setHex(0x000000);
+      key.mesh.material.emissiveIntensity = 0;
+      activeAnimations.delete(midiNote);
+    }
+  }
+
+  // 하강 애니메이션 시작
+  activeAnimations.set(midiNote, requestAnimationFrame(animatePress));
 }
 
 export function getKeyWidth(midiNote) {

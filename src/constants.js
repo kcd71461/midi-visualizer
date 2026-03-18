@@ -35,6 +35,11 @@ export const CAMERA_PRESETS = {
   side:    { x: 25, y: 8, z: 5,  lookAt: [0, 0, -5] },
 };
 
+// 오디오 스케줄러
+export const AUDIO = {
+  SCHEDULE_AHEAD: 0.15, // 실시간 lookahead (초)
+};
+
 // 앱 상태
 export const AppState = {
   IDLE: 'idle',
