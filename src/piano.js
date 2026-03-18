@@ -12,6 +12,10 @@ function isWhiteKey(midiNote) {
 }
 
 export function createPiano(scene) {
+  // 이전 키 초기화 (Storybook 스토리 전환 등에서 중복 방지)
+  keys.length = 0;
+  Object.keys(activeKeys).forEach(k => delete activeKeys[k]);
+
   const whiteKeyGeo = new THREE.BoxGeometry(
     PIANO.WHITE_KEY_WIDTH, PIANO.WHITE_KEY_HEIGHT, PIANO.WHITE_KEY_DEPTH
   );
@@ -75,16 +79,16 @@ export function pressKey(midiNote, color) {
 
   if (activeKeys[midiNote]) clearTimeout(activeKeys[midiNote]);
 
-  key.mesh.position.y = key.baseY - 0.05;
+  key.mesh.position.y = key.baseY - 0.1;
   key.mesh.material.emissive.setHex(color);
-  key.mesh.material.emissiveIntensity = 0.8;
+  key.mesh.material.emissiveIntensity = 1.5;
 
   activeKeys[midiNote] = setTimeout(() => {
     key.mesh.position.y = key.baseY;
     key.mesh.material.emissive.setHex(0x000000);
     key.mesh.material.emissiveIntensity = 0;
     delete activeKeys[midiNote];
-  }, 200);
+  }, 300);
 }
 
 export function getKeyWidth(midiNote) {
