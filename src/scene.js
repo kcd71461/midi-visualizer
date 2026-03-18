@@ -21,15 +21,63 @@ export function createScene(container) {
   renderer.setSize(container.clientWidth, container.clientHeight);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.0;
+  renderer.toneMappingExposure = 1.1;
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   container.appendChild(renderer.domElement);
 
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x020010);
   scene.fog = new THREE.FogExp2(0x020010, 0.008);
 
-  const ambientLight = new THREE.AmbientLight(0x404060, 0.5);
+  // 환경맵 (건반 반사용)
+  const pmremGenerator = new THREE.PMREMGenerator(renderer);
+  const envScene = new THREE.Scene();
+  envScene.background = new THREE.Color(0x020010);
+  const envHemi = new THREE.HemisphereLight(0x8899bb, 0x222233, 0.5);
+  envScene.add(envHemi);
+  scene.environment = pmremGenerator.fromScene(envScene, 0.04).texture;
+  pmremGenerator.dispose();
+
+  // --- 조명 ---
+  // HemisphereLight (AO 시뮬레이션)
+  const hemiLight = new THREE.HemisphereLight(0x8899bb, 0x111118, 0.15);
+  scene.add(hemiLight);
+
+  // 앰비언트 (약한 기본)
+  const ambientLight = new THREE.AmbientLight(0x1a1a30, 0.2);
   scene.add(ambientLight);
+
+  // 키 라이트 — 대각선 위에서 (그림자 포함)
+  const keyLight = new THREE.DirectionalLight(0xfff8f0, 1.0);
+  keyLight.position.set(4, 10, 6);
+  keyLight.castShadow = true;
+  keyLight.shadow.mapSize.width = 4096;
+  keyLight.shadow.mapSize.height = 4096;
+  keyLight.shadow.camera.left = -8;
+  keyLight.shadow.camera.right = 8;
+  keyLight.shadow.camera.top = 2;
+  keyLight.shadow.camera.bottom = -2;
+  keyLight.shadow.camera.near = 0.5;
+  keyLight.shadow.camera.far = 50;
+  keyLight.shadow.bias = -0.0005;
+  keyLight.shadow.normalBias = 0.02;
+  scene.add(keyLight);
+
+  // 필 라이트
+  const fillLight = new THREE.DirectionalLight(0x8899bb, 0.25);
+  fillLight.position.set(-5, 4, 3);
+  scene.add(fillLight);
+
+  // 림 라이트 (은은)
+  const rimLight = new THREE.DirectionalLight(0x4466aa, 0.2);
+  rimLight.position.set(0, 2, -8);
+  scene.add(rimLight);
+
+  // Edge graze light (건반 모서리 하이라이트)
+  const grazeLight = new THREE.DirectionalLight(0xaabbcc, 0.3);
+  grazeLight.position.set(3, 0.5, 6);
+  scene.add(grazeLight);
 
   stars = createStars();
   scene.add(stars);
@@ -71,9 +119,9 @@ export function setupPostProcessing(camera) {
 
   const bloomPass = new UnrealBloomPass(
     new THREE.Vector2(window.innerWidth, window.innerHeight),
-    1.5,
-    0.4,
-    0.85
+    0.6,   // strength — 은은한 글로우
+    0.3,   // radius
+    0.75   // threshold
   );
   composer.addPass(bloomPass);
 
