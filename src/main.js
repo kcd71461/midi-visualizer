@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { AppState, TRACK_COLORS, PIANO } from './constants.js';
-import { createScene, setupPostProcessing, updateScene, renderScene, handleResize, updateDynamicBloom } from './scene.js';
+import { createScene, setupPostProcessing, updateScene, renderScene, handleResize, updateDynamicBloom, updateDOF, updateGodRaysLightPosition } from './scene.js';
 import { createPiano, pressKey, getKeyX } from './piano.js';
 import { createNoteBlocks, updateNotePositions, setTrackVisible, setTrackColor, disposeNotes, setHitPoint, getHitPoint } from './notes.js';
 import { loadMidiFromUrl, loadMidiFromFile } from './midi-parser.js';
@@ -31,6 +31,10 @@ const state = {
 let camera, scene;
 const clock = new PlaybackClock();
 const sceneClock = new THREE.Clock();
+
+// 음악 에너지 EMA (Exponential Moving Average) — 급격한 변화 방지
+let smoothedEnergy = 0;
+const ENERGY_EMA_ALPHA = 0.08; // 낮을수록 더 부드럽게
 
 function setState(newState) {
   state.current = newState;
@@ -157,7 +161,7 @@ function init() {
   const container = document.getElementById('canvas-container');
 
   // 카메라
-  camera = new THREE.PerspectiveCamera(60, container.clientWidth / container.clientHeight, 0.1, 500);
+  camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 500);
 
   // 씬
   const sceneResult = createScene(container);
@@ -246,7 +250,7 @@ function animate() {
     updateNotePositions(t);
 
     // 음악 에너지 계산 (시네마틱 카메라용)
-    let musicEnergy = 0;
+    let rawEnergy = 0;
     if (state.midiData) {
       let activeCount = 0;
       state.midiData.tracks.forEach(track => {
@@ -255,15 +259,26 @@ function animate() {
           if (note.time <= t && note.time + note.duration >= t) activeCount++;
         });
       });
-      musicEnergy = Math.min(activeCount / 15, 1.0);
+      rawEnergy = Math.min(activeCount / 15, 1.0);
     }
+    // EMA 스무딩 — 급격한 에너지 변화를 완화
+    smoothedEnergy += ENERGY_EMA_ALPHA * (rawEnergy - smoothedEnergy);
 
     // 다이나믹 블룸 업데이트
-    updateDynamicBloom(musicEnergy);
+    updateDynamicBloom(smoothedEnergy);
+
+    // 동적 DOF — 카메라에서 피아노까지 실거리에 초점 맞춤
+    if (getCinematicCameraMode()) {
+      const distToPiano = camera.position.length();
+      updateDOF(distToPiano * 0.95);
+    }
+
+    // God Rays 광원 위치를 카메라 기준으로 갱신
+    updateGodRaysLightPosition(camera);
 
     // 카메라 업데이트
     if (getCinematicCameraMode()) {
-      updateCinematicCamera(t, musicEnergy);
+      updateCinematicCamera(t, smoothedEnergy);
     } else {
       updateCamera();
     }

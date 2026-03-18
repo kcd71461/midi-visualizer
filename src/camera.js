@@ -10,10 +10,14 @@ let freeMode = false;
 let cinematicEnabled = false;
 
 // ── 인트로 / 아웃트로 상태 ──
-const INTRO_DURATION = 3.0;
+const INTRO_DURATION = 5.0;   // 이전: 3.0 → 5.0 (여유로운 달리 백)
 const OUTRO_DURATION = 3.0;
-const introStartPos = new THREE.Vector3(0, 40, 0);
-const introStartTarget = new THREE.Vector3(0, 0, -5);
+// 인트로: 건반 바로 앞 저앙각에서 시작 (첫 프레임부터 건반이 꽉 차게)
+const introStartPos = new THREE.Vector3(0, 1.5, 5);
+const introStartTarget = new THREE.Vector3(0, 0.1, 0);
+// 인트로 종착점
+const introEndPos = new THREE.Vector3(5, 3, 12);
+const introEndTarget = new THREE.Vector3(0, 0.1, -1);
 
 let outroActive = false;
 let outroStartTime = 0;
@@ -50,69 +54,55 @@ function easeOutQuad(t) {
 // 각 경로는 시간(t)과 에너지(energy)를 받아 { position, target }을 반환
 const cinematicPaths = [
   {
-    // 기본: 피아노 주변을 천천히 원형 궤도로 회전
-    name: 'orbit',
+    // 경로 0: 피아노 옆에서 저앙각 슬라이드 — 건반 모서리가 선명하게
+    name: 'closeSlide',
     evaluate(t, _energy) {
-      const angle = t * 0.15;           // 느린 회전 속도
-      const radius = 22;
-      const height = 12;
+      const slide = Math.sin(t * 0.08) * 6;
       return {
-        position: new THREE.Vector3(
-          Math.sin(angle) * radius,
-          height,
-          Math.cos(angle) * radius
-        ),
-        target: new THREE.Vector3(0, 0, -5),
+        position: new THREE.Vector3(slide + 6, 3, 10),
+        target: new THREE.Vector3(slide * 0.3, 0.1, -1),
       };
     },
   },
   {
-    // 곡 시작: 위에서 천천히 내려옴
+    // 경로 1: 인트로 후 — 정면에서 약간 올려보며 서서히 빠짐
     name: 'descend',
     evaluate(t, _energy) {
-      const progress = Math.min(t / 10, 1); // 10초에 걸쳐 하강
+      const progress = Math.min(t / 12, 1);
       const easedProgress = easeOutQuad(progress);
-      const startY = 35;
-      const endY = 12;
-      const y = startY + (endY - startY) * easedProgress;
-      const z = 5 + 13 * easedProgress;
+      const y = 3 + 4 * easedProgress;
+      const z = 10 + 6 * easedProgress;
       return {
         position: new THREE.Vector3(0, y, z),
-        target: new THREE.Vector3(0, 0, -5),
+        target: new THREE.Vector3(0, 0.1, -2),
       };
     },
   },
   {
-    // 활발한 구간: 줌인 + 빠른 회전
+    // 경로 2: 활발한 구간 — 가까이 줌인 + 빠른 회전
     name: 'energetic',
     evaluate(t, energy) {
-      const angle = t * 0.35;           // 더 빠른 회전
-      const radius = 12 - energy * 4;   // 에너지 높을수록 줌인
-      const height = 6 + energy * 3;
+      const angle = t * 0.35;
+      const radius = 8 - energy * 3;    // 이전: 12-4 → 8-3 (더 가까이)
+      const height = 3 + energy * 2;     // 이전: 6+3 → 3+2 (더 낮게)
       return {
         position: new THREE.Vector3(
           Math.sin(angle) * radius,
           height,
-          Math.cos(angle) * radius
+          Math.cos(angle) * radius + 3
         ),
-        target: new THREE.Vector3(0, 1, -3),
+        target: new THREE.Vector3(0, 0.1, -1),
       };
     },
   },
   {
-    // 차분한 구간: 멀리서 바라보기
+    // 경로 3: 차분한 구간 — 콘서트홀 청중 시점 (멀지만 적당히)
     name: 'calm',
     evaluate(t, _energy) {
-      const angle = t * 0.08;           // 매우 느린 회전
-      const radius = 30;
-      const height = 18;
+      const drift = Math.sin(t * 0.05) * 4;
       return {
-        position: new THREE.Vector3(
-          Math.sin(angle) * radius,
-          height,
-          Math.cos(angle) * radius
-        ),
-        target: new THREE.Vector3(0, 0, -5),
+        position: new THREE.Vector3(drift, 8, 18),
+        target: new THREE.Vector3(0, 0.1, -3),
       };
     },
   },
@@ -229,19 +219,18 @@ export function isCinematicMode() {
 export function updateCinematicCamera(currentTime, musicEnergy) {
   if (!cinematicEnabled || !camera) return;
 
-  // ── 아웃트로 시퀀스 ──
+  // ── 아웃트로 시퀀스 — 건반 정면 클로즈업으로 줌인 ──
   if (outroActive) {
     const elapsed = currentTime - outroStartTime;
     const progress = THREE.MathUtils.clamp(elapsed / OUTRO_DURATION, 0, 1);
-    const easedProgress = easeInCubic(progress); // 느리게 시작, 가속
+    const eased = easeInOutCubic(progress);
 
-    const goalPos = outroStartPos.clone().add(
-      new THREE.Vector3(0, 20 * easedProgress, 10 * easedProgress)
-    );
-    const goalTarget = outroStartTarget.clone();
+    // 현재 위치 → 건반 정면 클로즈업
+    const outroGoalPos = new THREE.Vector3(0, 1.5, 6);
+    const outroGoalTarget = new THREE.Vector3(0, 0.1, 0);
 
-    cinematicPos.copy(goalPos);
-    cinematicTarget.copy(goalTarget);
+    cinematicPos.lerpVectors(outroStartPos, outroGoalPos, eased);
+    cinematicTarget.lerpVectors(outroStartTarget, outroGoalTarget, eased);
 
     camera.position.copy(cinematicPos);
     camera.lookAt(cinematicTarget);
@@ -249,20 +238,20 @@ export function updateCinematicCamera(currentTime, musicEnergy) {
     return;
   }
 
-  // ── 인트로 시퀀스 (0~3초) ──
+  // ── 인트로 시퀀스 (0~5초) — 건반 클로즈업에서 달리 백 ──
   if (currentTime < INTRO_DURATION) {
-    const firstPath = cinematicPaths[0].evaluate(currentTime, 0);
+    const t = THREE.MathUtils.clamp(currentTime / INTRO_DURATION, 0, 1);
 
-    if (currentTime < 1.0) {
-      // 0~1초: 탑뷰 유지
+    if (t < 0.15) {
+      // 0~0.75초: 건반 클로즈업 정지 (첫 프레임부터 건반이 화면에 꽉 참)
       cinematicPos.copy(introStartPos);
       cinematicTarget.copy(introStartTarget);
     } else {
-      // 1~3초: 탑뷰에서 첫 번째 경로 위치로 이동
-      const t = (currentTime - 1.0) / (INTRO_DURATION - 1.0); // 0→1
-      const eased = easeInOutCubic(t);
-      cinematicPos.lerpVectors(introStartPos, firstPath.position, eased);
-      cinematicTarget.lerpVectors(introStartTarget, firstPath.target, eased);
+      // 0.75~5초: 건반에서 천천히 빠지는 달리 백
+      const pullT = (t - 0.15) / 0.85;
+      const pulledEased = easeInOutCubic(pullT);
+      cinematicPos.lerpVectors(introStartPos, introEndPos, pulledEased);
+      cinematicTarget.lerpVectors(introStartTarget, introEndTarget, pulledEased);
     }
 
     camera.position.copy(cinematicPos);
@@ -307,6 +296,11 @@ export function updateCinematicCamera(currentTime, musicEnergy) {
     goalPos = curr.position;
     goalTarget = curr.target;
   }
+
+  // 카메라가 피아노 뒤로 가지 않도록 Z 하한 설정
+  if (goalPos.z < 2) goalPos.z = 2;
+  // 카메라 높이 하한 (건반 아래로 내려가지 않도록)
+  if (goalPos.y < 1) goalPos.y = 1;
 
   // 최종 위치로 부드럽게 이동 (추가 댐핑)
   const smoothFactor = 0.03;

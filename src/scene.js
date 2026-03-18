@@ -44,21 +44,21 @@ const GodRaysShader = {
       vec2 deltaTexCoord = (texCoord - lightPosition);
       deltaTexCoord *= 1.0 / float(samples) * density;
 
-      vec4 color = texture2D(tDiffuse, texCoord);
-      vec4 origColor = color;
+      vec4 origColor = texture2D(tDiffuse, texCoord);
       float illuminationDecay = 1.0;
+      vec4 godRays = vec4(0.0);
 
       for (int i = 0; i < 60; i++) {
         if (i >= samples) break;
         texCoord -= deltaTexCoord;
         vec4 sampleColor = texture2D(tDiffuse, texCoord);
         sampleColor *= illuminationDecay * weight;
-        color += sampleColor;
+        godRays += sampleColor;
         illuminationDecay *= decay;
       }
 
-      // 원본 색상에 God Rays를 부드럽게 합성 (additive blend)
-      gl_FragColor = origColor + color * exposure;
+      // 원본에 God Rays만 additive (이중 합산 방지)
+      gl_FragColor = origColor + godRays * exposure;
     }
   `,
 };
@@ -146,15 +146,22 @@ export function createScene(container) {
   scene.background = new THREE.Color(0x020010);
   scene.fog = new THREE.FogExp2(0x020010, 0.004);
 
-  // 환경맵 (건반 반사용) — 밝은 환경으로 반사가 선명하게
+  // 환경맵 (건반 반사용) — 고대비 환경으로 clearcoat 반사가 선명하게 맺히도록
+  // 밝은 하이라이트 포인트를 여러 방향에 배치 → 흑건에 빛나는 반사점 생성
   const pmremGenerator = new THREE.PMREMGenerator(renderer);
   const envScene = new THREE.Scene();
-  envScene.background = new THREE.Color(0x0a0a20);
-  const envHemi = new THREE.HemisphereLight(0xaabbdd, 0x333344, 1.0);
+  envScene.background = new THREE.Color(0x050515);
+  const envHemi = new THREE.HemisphereLight(0xbbccff, 0x111122, 2.5);  // 이전: 1.0
   envScene.add(envHemi);
-  const envDir = new THREE.DirectionalLight(0xffffff, 0.8);
-  envDir.position.set(1, 1, 1);
-  envScene.add(envDir);
+  const envDir1 = new THREE.DirectionalLight(0xffffff, 3.0);  // 이전: 0.8
+  envDir1.position.set(2, 3, 2);
+  envScene.add(envDir1);
+  const envDir2 = new THREE.DirectionalLight(0x8899ff, 1.5);
+  envDir2.position.set(-3, 1, -1);
+  envScene.add(envDir2);
+  const envDir3 = new THREE.DirectionalLight(0xffeedd, 2.0);
+  envDir3.position.set(0, -1, 3);  // 아래에서 올라오는 반사 — 흑건 상면에 catchlight
+  envScene.add(envDir3);
   scene.environment = pmremGenerator.fromScene(envScene, 0.04).texture;
   pmremGenerator.dispose();
 
@@ -167,43 +174,55 @@ export function createScene(container) {
   const ambientLight = new THREE.AmbientLight(0x2a2a50, 0.5);
   scene.add(ambientLight);
 
-  // 키 라이트 — 대각선 위에서 (그림자 포함)
-  const keyLight = new THREE.DirectionalLight(0xfff8f0, 1.5);
-  keyLight.position.set(4, 10, 6);
+  // 키 라이트 — 낮은 그레이징 앵글로 건반 모서리를 가로질러 비춤
+  // y를 낮추고 z를 키워 건반 표면을 사선으로 긁듯이 조명 → 에지 하이라이트 극대화
+  const keyLight = new THREE.DirectionalLight(0xfff5e0, 2.5);
+  keyLight.position.set(6, 4, 12);  // 이전: (4, 10, 6) → 높이를 낮추고 전방으로 당김
   keyLight.castShadow = true;
   keyLight.shadow.mapSize.width = 4096;
   keyLight.shadow.mapSize.height = 4096;
-  keyLight.shadow.camera.left = -16;
-  keyLight.shadow.camera.right = 16;
-  keyLight.shadow.camera.top = 4;
-  keyLight.shadow.camera.bottom = -4;
+  keyLight.shadow.camera.left = -18;
+  keyLight.shadow.camera.right = 18;
+  keyLight.shadow.camera.top = 6;
+  keyLight.shadow.camera.bottom = -6;
   keyLight.shadow.camera.near = 0.5;
-  keyLight.shadow.camera.far = 50;
-  keyLight.shadow.bias = -0.0005;
-  keyLight.shadow.normalBias = 0.02;
+  keyLight.shadow.camera.far = 60;
+  keyLight.shadow.bias = -0.0003;
+  keyLight.shadow.normalBias = 0.01;
   scene.add(keyLight);
 
-  // 필 라이트 (건반 반대편에서 밝게)
-  const fillLight = new THREE.DirectionalLight(0x8899bb, 0.6);
-  fillLight.position.set(-5, 4, 3);
+  // 반대편 그레이징 라이트 — 좌측 낮은 앵글에서 우측으로 가로질러 검은 건반 전면 에지 밝힘
+  const fillLight = new THREE.DirectionalLight(0xc8d8ff, 1.2);
+  fillLight.position.set(-8, 3, 10);  // 이전: (-5, 4, 3) → z를 크게 키워 전방에서 사선
   scene.add(fillLight);
 
-  // 림 라이트 (뒤에서 윤곽 강조)
-  const rimLight = new THREE.DirectionalLight(0x6688cc, 0.5);
-  rimLight.position.set(0, 2, -8);
+  // 림 라이트 — 뒤에서 건반 상단 모서리 실루엣 강조 (검은 건반이 배경에서 분리되도록)
+  const rimLight = new THREE.DirectionalLight(0x4466ff, 1.8);  // 이전 intensity: 0.5
+  rimLight.position.set(0, 5, -10);
   scene.add(rimLight);
 
-  // Edge graze light (건반 모서리 하이라이트)
-  const grazeLight = new THREE.DirectionalLight(0xaabbcc, 0.4);
-  grazeLight.position.set(3, 0.5, 6);
-  scene.add(grazeLight);
+  // 카운터 림 라이트 — 우측 뒤에서 비대칭 윤곽 (시네마틱 룩)
+  const counterRimLight = new THREE.DirectionalLight(0x221144, 0.8);
+  counterRimLight.position.set(8, 3, -6);
+  scene.add(counterRimLight);
 
-  // 피아노 전용 스포트라이트 (위에서 건반을 비춤)
-  const pianoSpotLight = new THREE.SpotLight(0xffffff, 2.0, 30, Math.PI / 4, 0.5, 1);
-  pianoSpotLight.position.set(0, 15, 5);
+  // 건반 전용 로우 앵글 스포트라이트 — 정면 낮은 곳에서 건반 앞면을 비춤
+  // Math.PI / 8 = 22.5도 좁은 빔으로 건반 표면에 집중
+  const pianoSpotLight = new THREE.SpotLight(0xffeedd, 4.0, 40, Math.PI / 8, 0.3, 1.5);
+  pianoSpotLight.position.set(0, 6, 14);   // 이전: (0, 15, 5) → 전방에서 낮게
   pianoSpotLight.target.position.set(0, 0, 0);
+  pianoSpotLight.castShadow = true;
+  pianoSpotLight.shadow.mapSize.width = 2048;
+  pianoSpotLight.shadow.mapSize.height = 2048;
+  pianoSpotLight.shadow.bias = -0.0003;
   scene.add(pianoSpotLight);
   scene.add(pianoSpotLight.target);
+
+  // 검은 건반 전면 에지 전용 언더라이트 — 살짝 아래에서 올려비춤
+  // 검은 건반의 앞 면을 밝혀 배경과 분리
+  const underLight = new THREE.DirectionalLight(0x334466, 0.9);
+  underLight.position.set(0, -1, 8);
+  scene.add(underLight);
 
   // --- 반사면 (Reflective Floor) ---
   // 피아노 아래에 은은한 반사 평면 배치
@@ -275,11 +294,13 @@ export function setupPostProcessing(camera) {
   composer.addPass(new RenderPass(scene, camera));
 
   // 2. UnrealBloomPass
+  // threshold를 0.75 → 0.88로 올려 흰 건반 표면이 bloom에 씻기지 않게 함
+  // 발광 노트(emissive)와 눌린 키만 glow되고, 흰 건반 자체는 선명하게 유지
   bloomPass = new UnrealBloomPass(
     new THREE.Vector2(w, h),
-    0.6,   // strength — 은은한 글로우
-    0.3,   // radius
-    0.75   // threshold
+    0.5,   // strength — 약간 줄여 washout 방지
+    0.25,  // radius — 더 타이트하게
+    0.88   // threshold — 이전: 0.75 → 흰 건반(1.0)이 threshold를 겨우 넘어 bloom 최소화
   );
   composer.addPass(bloomPass);
 
@@ -288,11 +309,11 @@ export function setupPostProcessing(camera) {
   godRaysPass.uniforms.lightPosition.value.set(0.5, 0.9);
   composer.addPass(godRaysPass);
 
-  // 4. BokehPass (DOF)
+  // 4. BokehPass (DOF) — 건반에 초점, aperture 좁혀 선명도 확보
   bokehPass = new BokehPass(scene, camera, {
-    focus: 15.0,
-    aperture: 0.002,
-    maxblur: 0.008,
+    focus: 10.0,       // 이전: 15.0 → 카메라-피아노 실거리에 맞춤
+    aperture: 0.0008,  // 이전: 0.002 → 줄여서 건반 선명 영역 확대
+    maxblur: 0.004,    // 이전: 0.008 → 배경만 살짝 흐림
   });
   composer.addPass(bokehPass);
 
@@ -357,17 +378,39 @@ export function handleResize(camera, container) {
 export function updateDynamicBloom(musicEnergy) {
   if (!bloomPass) return;
   const clamped = Math.max(0, Math.min(1, musicEnergy));
-  // 0.4 ~ 1.2 사이로 선형 보간
-  bloomPass.strength = 0.4 + clamped * 0.8;
+  // strength: 0.3 ~ 0.8 (이전: 0.4~1.2) — 상한을 낮춰 강한 에너지에도 흰 건반 washout 방지
+  bloomPass.strength = 0.3 + clamped * 0.5;
 }
 
 /**
  * DOF 초점 거리를 업데이트합니다.
  * @param {number} focusDistance - 초점 거리 (기본값 15.0)
  */
-export function updateDOF(focusDistance = 15.0) {
+export function updateDOF(focusDistance = 10.0) {
   if (!bokehPass) return;
   bokehPass.uniforms['focus'].value = focusDistance;
+  // 가까울수록 aperture를 더 좁혀 건반 선명도 유지
+  const normalizedDist = THREE.MathUtils.clamp((focusDistance - 5) / 25, 0, 1);
+  bokehPass.uniforms['aperture'].value = 0.0003 + normalizedDist * 0.0007;
+}
+
+/**
+ * God Rays 광원 위치를 카메라 기준으로 업데이트합니다.
+ * 3D 광원 위치를 화면 UV 좌표로 투영하여 God Rays의 원점을 갱신.
+ * @param {THREE.Camera} cam - 현재 카메라
+ */
+export function updateGodRaysLightPosition(cam) {
+  if (!godRaysPass || !cam) return;
+  // 고정 광원 위치 (피아노 위쪽 뒤편)
+  const lightWorldPos = new THREE.Vector3(0, 15, -10);
+  const projected = lightWorldPos.clone().project(cam);
+  // NDC(-1~1) → UV(0~1)
+  const u = (projected.x + 1) / 2;
+  const v = (projected.y + 1) / 2;
+  godRaysPass.uniforms.lightPosition.value.set(
+    THREE.MathUtils.clamp(u, 0.1, 0.9),
+    THREE.MathUtils.clamp(v, 0.1, 0.95)
+  );
 }
 
 export function getScene() { return scene; }

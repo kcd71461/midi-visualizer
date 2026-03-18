@@ -16,35 +16,41 @@ function isWhiteKey(midiNote) {
 
 // 검은 건반 per-key 미세 변화 생성
 function createBlackKeyMaterial(keyIndex) {
-  // 기본 색상에 미세한 변화 (0x18~0x22 범위)
-  const baseR = 0x18 + Math.floor(Math.random() * 0x0a);
-  const baseG = 0x18 + Math.floor(Math.random() * 0x08);
-  const baseB = 0x1e + Math.floor(Math.random() * 0x0a);
+  // 색상을 완전한 흑에 가깝게 (이전: 0x18~0x22 → 0x08~0x10)
+  // 흰건반과의 명도 대비를 극대화
+  const baseR = 0x08 + Math.floor(Math.random() * 0x06);
+  const baseG = 0x08 + Math.floor(Math.random() * 0x05);
+  const baseB = 0x0c + Math.floor(Math.random() * 0x06);
   const color = (baseR << 16) | (baseG << 8) | baseB;
 
-  // roughness도 미세하게 변화 (에보니 질감)
-  const roughness = 0.2 + Math.random() * 0.15;
+  // roughness를 낮춰 clearcoat 반사가 강하게 맺히도록 (에보니 고광택 피아노)
+  // 이전: 0.2~0.35 → 0.05~0.12 (거울에 가까운 매끄러운 흑건)
+  const roughness = 0.05 + Math.random() * 0.07;
 
   return new THREE.MeshPhysicalMaterial({
     color,
+    emissive: 0x112233,
+    emissiveIntensity: 0.1,  // 검은 건반에 미세한 파란 발광 — 배경과 분리
     roughness,
-    metalness: 0.1,
+    metalness: 0.0,
     reflectivity: 1.0,
     clearcoat: 1.0,
-    clearcoatRoughness: 0.03 + Math.random() * 0.04,
-    envMapIntensity: 1.0,
+    clearcoatRoughness: 0.02 + Math.random() * 0.02,
+    envMapIntensity: 2.5,
   });
 }
 
 function createWhiteKeyMaterial() {
   return new THREE.MeshPhysicalMaterial({
     color: 0xffffff,
-    roughness: 0.1,
-    metalness: 0.02,
-    reflectivity: 0.9,
-    clearcoat: 0.8,
-    clearcoatRoughness: 0.1,
-    envMapIntensity: 1.2,
+    emissive: 0xffffff,
+    emissiveIntensity: 0.06,  // 약한 자체발광 — 어두운 환경에서도 건반 보임
+    roughness: 0.08,
+    metalness: 0.0,
+    reflectivity: 1.0,
+    clearcoat: 1.0,
+    clearcoatRoughness: 0.06,
+    envMapIntensity: 1.8,
   });
 }
 

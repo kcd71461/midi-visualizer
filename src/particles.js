@@ -40,7 +40,7 @@ const WAVE_DURATION = 0.6;        // 파동 지속 시간 (초)
 const WAVE_RADIUS_START = 0.1;    // 시작 반지름
 const WAVE_RADIUS_END = 2.0;      // 최종 반지름
 const WAVE_OPACITY_START = 0.8;   // 시작 투명도
-const WAVE_Y = PIANO.WHITE_KEY_HEIGHT / 2 + 0.12 / 2 + 0.02; // NOTE_Y + 0.02
+const WAVE_Y = -0.02;  // 건반 아래 지면 레벨 — 건반을 가리지 않음
 
 // === 히트 웨이브 관련 변수 ===
 let wavePool = [];                // { mesh, lifetime, maxLifetime, x, z, color }
@@ -351,11 +351,12 @@ function updateHitWaves(dt) {
       continue;
     }
 
-    // 반지름: 0.1 → 2.0 (선형 보간)
-    const radius = WAVE_RADIUS_START + (WAVE_RADIUS_END - WAVE_RADIUS_START) * progress;
+    // 반지름: easeOutCubic으로 처음에 빠르게 확장, 후반에 감속
+    const easedProgress = 1 - Math.pow(1 - progress, 3);
+    const radius = WAVE_RADIUS_START + (WAVE_RADIUS_END - WAVE_RADIUS_START) * easedProgress;
     wave.mesh.scale.set(radius, radius, radius);
 
-    // 투명도: 0.8 → 0.0 (이징: 후반에 빠르게)
+    // 투명도: easeInQuad로 부드럽게 사라짐
     wave.material.opacity = WAVE_OPACITY_START * (1.0 - progress * progress);
   }
 }

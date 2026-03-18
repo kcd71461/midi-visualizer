@@ -32,14 +32,14 @@ export function createNoteBlocks(scene, midiData) {
 
     const color = track.color || TRACK_COLORS[trackIndex % TRACK_COLORS.length];
 
-    // 크리스탈/유리 느낌 머티리얼
+    // 크리스탈/유리 느낌 머티리얼 — NormalBlending으로 건반 가시성 확보
     const material = new THREE.MeshPhysicalMaterial({
       color: color,
       emissive: color,
-      emissiveIntensity: 0.5,
+      emissiveIntensity: 0.35,
       transparent: true,
-      opacity: 0.65,
-      transmission: 0.3,
+      opacity: 0.82,
+      transmission: 0.15,
       roughness: 0.05,
       metalness: 0.0,
       ior: 1.5,
@@ -48,8 +48,8 @@ export function createNoteBlocks(scene, midiData) {
       clearcoatRoughness: 0.1,
       reflectivity: 0.9,
       envMapIntensity: 0.8,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
+      blending: THREE.NormalBlending,
+      depthWrite: true,
     });
 
     const maxVisible = track.notes.length;
@@ -96,7 +96,7 @@ export function createNoteBlocks(scene, midiData) {
   });
 }
 
-const NOTE_Y = PIANO.WHITE_KEY_HEIGHT / 2 + NOTES.BLOCK_HEIGHT / 2;
+const NOTE_Y = PIANO.WHITE_KEY_HEIGHT / 2 + NOTES.BLOCK_HEIGHT / 2 + 0.15;
 const KEY_FRONT_Z = PIANO.WHITE_KEY_DEPTH / 2;   // 앞쪽 가장자리
 const KEY_BACK_Z = -PIANO.WHITE_KEY_DEPTH / 2;    // 뒤쪽 가장자리
 

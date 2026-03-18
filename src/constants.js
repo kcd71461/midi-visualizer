@@ -29,10 +29,10 @@ export const TRACK_COLORS = [
 
 // 카메라 프리셋
 export const CAMERA_PRESETS = {
-  default: { x: 0, y: 12, z: 18, lookAt: [0, 0, -5] },
-  front:   { x: 0, y: 3,  z: 20, lookAt: [0, 0, 0] },
-  top:     { x: 0, y: 25, z: 0,  lookAt: [0, 0, -5] },
-  side:    { x: 25, y: 8, z: 5,  lookAt: [0, 0, -5] },
+  default: { x: 0, y: 7, z: 16, lookAt: [0, 0, 0] },
+  front:   { x: 0, y: 2, z: 16, lookAt: [0, 0, 0] },
+  top:     { x: 0, y: 22, z: 2, lookAt: [0, 0, -3] },
+  side:    { x: 20, y: 6, z: 5, lookAt: [0, 0, 0] },
 };
 
 // 오디오 스케줄러
