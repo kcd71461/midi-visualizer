@@ -41,6 +41,8 @@
 - Create: `index.html`
 - Create: `src/main.js`
 - Create: `src/constants.js`
+- Create: `.storybook/main.js`
+- Create: `.storybook/preview.js`
 
 - [ ] **Step 1: package.json 생성**
 
@@ -281,11 +283,30 @@ init();
 Run: `npx vite --open`
 Expected: 브라우저에서 검정 배경 + 파일 선택 오버레이 표시, 콘솔에 "3D MIDI Visualizer initialized" 출력
 
-- [ ] **Step 8: 커밋**
+- [ ] **Step 8: Storybook 설치 및 설정**
+
+Run: `npx storybook@latest init --type html --no-dev`
+
+`.storybook/main.js`:
+```js
+export default {
+  stories: ['../src/**/*.stories.js'],
+  framework: '@storybook/html-vite',
+};
+```
+
+`.storybook/preview.js`:
+```js
+export const parameters = {
+  layout: 'fullscreen',
+};
+```
+
+- [ ] **Step 9: 커밋**
 
 ```bash
-git add package.json package-lock.json vite.config.js index.html src/main.js src/constants.js
-git commit -m "feat: scaffold Vite project with dependencies and HTML shell"
+git add package.json package-lock.json vite.config.js index.html src/main.js src/constants.js .storybook/
+git commit -m "feat: scaffold Vite project with dependencies, HTML shell, and Storybook"
 ```
 
 ---
@@ -479,6 +500,7 @@ git commit -m "feat: add Three.js scene with starfield background and bloom"
 
 **Files:**
 - Create: `src/piano.js`
+- Create: `src/piano.stories.js`
 - Modify: `src/main.js`
 
 - [ ] **Step 1: src/piano.js 생성**
@@ -601,15 +623,179 @@ import { createPiano } from './piano.js';
 createPiano(scene);
 ```
 
-- [ ] **Step 3: 브라우저에서 확인**
+- [ ] **Step 3: Storybook story 생성 (src/piano.stories.js)**
 
-Expected: 우주 배경 앞에 88건반 피아노가 가로로 배치되어 보임. 흰 건반과 검은 건반이 올바르게 구분됨.
+```js
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { createPiano, pressKey } from './piano.js';
+import { PIANO, TRACK_COLORS } from './constants.js';
 
-- [ ] **Step 4: 커밋**
+export default {
+  title: 'Components/Piano',
+};
+
+function createPianoScene(container) {
+  const width = container.clientWidth || 900;
+  const height = container.clientHeight || 500;
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(width, height);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  container.appendChild(renderer.domElement);
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x1a1a2e);
+
+  const camera = new THREE.PerspectiveCamera(60, width / height, 0.1, 500);
+  camera.position.set(0, 8, 12);
+  camera.lookAt(0, 0, 0);
+
+  const ambientLight = new THREE.AmbientLight(0x404060, 0.8);
+  scene.add(ambientLight);
+  const dirLight = new THREE.DirectionalLight(0xffffff, 0.6);
+  dirLight.position.set(5, 10, 5);
+  scene.add(dirLight);
+
+  const controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+
+  createPiano(scene);
+
+  function animate() {
+    requestAnimationFrame(animate);
+    controls.update();
+    renderer.render(scene, camera);
+  }
+  animate();
+
+  // 클린업
+  const resizeObserver = new ResizeObserver(() => {
+    const w = container.clientWidth;
+    const h = container.clientHeight;
+    renderer.setSize(w, h);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+  });
+  resizeObserver.observe(container);
+
+  return { scene, renderer, camera };
+}
+
+// 기본 피아노 뷰
+export const Default = () => {
+  const wrapper = document.createElement('div');
+  wrapper.style.width = '100%';
+  wrapper.style.height = '500px';
+
+  // Three.js는 DOM에 추가된 후 초기화해야 크기가 잡힘
+  setTimeout(() => createPianoScene(wrapper), 0);
+  return wrapper;
+};
+
+// 건반 눌림 테스트
+export const KeyPressTest = () => {
+  const wrapper = document.createElement('div');
+  wrapper.style.display = 'flex';
+  wrapper.style.flexDirection = 'column';
+  wrapper.style.height = '100vh';
+  wrapper.style.background = '#1a1a2e';
+
+  // 3D 컨테이너
+  const sceneContainer = document.createElement('div');
+  sceneContainer.style.flex = '1';
+  wrapper.appendChild(sceneContainer);
+
+  // 버튼 패널
+  const panel = document.createElement('div');
+  panel.style.cssText = 'padding:12px;display:flex;flex-wrap:wrap;gap:8px;background:#111;';
+  wrapper.appendChild(panel);
+
+  // 개별 키 버튼
+  const testNotes = [
+    { midi: 60, name: 'C4 (도)' },
+    { midi: 62, name: 'D4 (레)' },
+    { midi: 64, name: 'E4 (미)' },
+    { midi: 65, name: 'F4 (파)' },
+    { midi: 67, name: 'G4 (솔)' },
+    { midi: 69, name: 'A4 (라)' },
+    { midi: 71, name: 'B4 (시)' },
+    { midi: 61, name: 'C#4' },
+    { midi: 63, name: 'D#4' },
+    { midi: 66, name: 'F#4' },
+    { midi: 68, name: 'G#4' },
+    { midi: 70, name: 'A#4' },
+  ];
+
+  testNotes.forEach(({ midi, name }, i) => {
+    const btn = document.createElement('button');
+    btn.textContent = name;
+    btn.style.cssText = `padding:8px 16px;border:1px solid #444;border-radius:6px;
+      background:#222;color:#fff;cursor:pointer;font-size:13px;`;
+    btn.addEventListener('click', () => {
+      pressKey(midi, TRACK_COLORS[i % TRACK_COLORS.length]);
+    });
+    panel.appendChild(btn);
+  });
+
+  // 코드(화음) 버튼
+  const chords = [
+    { name: 'C 메이저', notes: [60, 64, 67] },
+    { name: 'A 마이너', notes: [57, 60, 64] },
+    { name: 'G 메이저', notes: [55, 59, 62] },
+    { name: 'F 메이저', notes: [53, 57, 60] },
+  ];
+
+  const chordPanel = document.createElement('div');
+  chordPanel.style.cssText = 'padding:8px 12px;display:flex;gap:8px;background:#111;border-top:1px solid #333;';
+  wrapper.appendChild(chordPanel);
+
+  const chordLabel = document.createElement('span');
+  chordLabel.textContent = '화음: ';
+  chordLabel.style.cssText = 'color:#888;font-size:13px;line-height:36px;';
+  chordPanel.appendChild(chordLabel);
+
+  chords.forEach(({ name, notes }, ci) => {
+    const btn = document.createElement('button');
+    btn.textContent = name;
+    btn.style.cssText = `padding:8px 16px;border:1px solid #666;border-radius:6px;
+      background:#333;color:#fff;cursor:pointer;font-size:13px;`;
+    btn.addEventListener('click', () => {
+      notes.forEach((midi, ni) => {
+        pressKey(midi, TRACK_COLORS[(ci + ni) % TRACK_COLORS.length]);
+      });
+    });
+    chordPanel.appendChild(btn);
+  });
+
+  // 랜덤 재생 버튼
+  const randomBtn = document.createElement('button');
+  randomBtn.textContent = '🎲 랜덤 노트';
+  randomBtn.style.cssText = `padding:8px 16px;border:1px solid #4ecdc4;border-radius:6px;
+    background:#1a3a38;color:#4ecdc4;cursor:pointer;font-size:13px;`;
+  randomBtn.addEventListener('click', () => {
+    const randomMidi = Math.floor(Math.random() * 61) + 30;
+    pressKey(randomMidi, TRACK_COLORS[Math.floor(Math.random() * TRACK_COLORS.length)]);
+  });
+  chordPanel.appendChild(randomBtn);
+
+  setTimeout(() => createPianoScene(sceneContainer), 0);
+  return wrapper;
+};
+```
+
+- [ ] **Step 4: Storybook에서 확인**
+
+Run: `npm run storybook`
+Expected:
+- "Components/Piano/Default" — 88건반 피아노가 3D로 표시, 마우스로 회전/줌 가능
+- "Components/Piano/Key Press Test" — 개별 키 버튼, 화음 버튼, 랜덤 버튼으로 건반 눌림 + 글로우 애니메이션 확인
+
+- [ ] **Step 5: 커밋**
 
 ```bash
-git add src/piano.js src/main.js
-git commit -m "feat: add 3D piano keyboard with 88 keys"
+git add src/piano.js src/piano.stories.js src/main.js
+git commit -m "feat: add 3D piano keyboard with Storybook stories"
 ```
 
 ---
