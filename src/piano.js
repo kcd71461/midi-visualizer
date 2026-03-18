@@ -23,11 +23,21 @@ export function createPiano(scene) {
     PIANO.BLACK_KEY_WIDTH, PIANO.BLACK_KEY_HEIGHT, PIANO.BLACK_KEY_DEPTH
   );
 
-  const whiteMat = new THREE.MeshStandardMaterial({
-    color: 0xeeeeee, roughness: 0.3, metalness: 0.1,
+  const whiteMat = new THREE.MeshPhysicalMaterial({
+    color: 0xfafafa,
+    roughness: 0.15,
+    metalness: 0.05,
+    reflectivity: 0.8,
+    clearcoat: 0.6,
+    clearcoatRoughness: 0.2,
   });
-  const blackMat = new THREE.MeshStandardMaterial({
-    color: 0x111111, roughness: 0.4, metalness: 0.2,
+  const blackMat = new THREE.MeshPhysicalMaterial({
+    color: 0x0a0a0a,
+    roughness: 0.1,
+    metalness: 0.3,
+    reflectivity: 1.0,
+    clearcoat: 1.0,
+    clearcoatRoughness: 0.1,
   });
 
   let whiteIndex = 0;

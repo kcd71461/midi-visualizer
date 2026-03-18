@@ -1,5 +1,8 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { createPiano, pressKey } from './piano.js';
 import { PIANO, TRACK_COLORS } from './constants.js';
 
@@ -16,28 +19,68 @@ function createPianoScene(container) {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   container.appendChild(renderer.domElement);
 
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.2;
+
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x1a1a2e);
+  scene.background = new THREE.Color(0x0a0a1a);
 
   const camera = new THREE.PerspectiveCamera(60, width / height, 0.1, 500);
-  camera.position.set(0, 8, 12);
-  camera.lookAt(0, 0, 0);
+  camera.position.set(0, 5, 10);
+  camera.lookAt(0, 0, -0.3);
 
-  const ambientLight = new THREE.AmbientLight(0x404060, 0.8);
+  // 조명: 반사와 깊이감을 위해 다방향 라이트
+  const ambientLight = new THREE.AmbientLight(0x303050, 0.4);
   scene.add(ambientLight);
-  const dirLight = new THREE.DirectionalLight(0xffffff, 0.6);
-  dirLight.position.set(5, 10, 5);
-  scene.add(dirLight);
+
+  // 메인 키 라이트 (위에서 약간 앞쪽)
+  const keyLight = new THREE.DirectionalLight(0xffffff, 1.0);
+  keyLight.position.set(2, 8, 6);
+  scene.add(keyLight);
+
+  // 림 라이트 (뒤에서 비추어 윤곽 강조)
+  const rimLight = new THREE.DirectionalLight(0x6688cc, 0.5);
+  rimLight.position.set(-3, 4, -8);
+  scene.add(rimLight);
+
+  // 필 라이트 (반대편에서 그림자 보완)
+  const fillLight = new THREE.DirectionalLight(0x8888aa, 0.3);
+  fillLight.position.set(-5, 3, 4);
+  scene.add(fillLight);
+
+  // 바닥 반사면 (건반 아래 약간의 반사)
+  const floorGeo = new THREE.PlaneGeometry(30, 10);
+  const floorMat = new THREE.MeshPhysicalMaterial({
+    color: 0x111122,
+    roughness: 0.3,
+    metalness: 0.6,
+    reflectivity: 0.5,
+  });
+  const floor = new THREE.Mesh(floorGeo, floorMat);
+  floor.rotation.x = -Math.PI / 2;
+  floor.position.y = -0.08;
+  scene.add(floor);
 
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
 
   createPiano(scene);
 
+  // 블룸 후처리 (발광 효과)
+  const composer = new EffectComposer(renderer);
+  composer.addPass(new RenderPass(scene, camera));
+  const bloomPass = new UnrealBloomPass(
+    new THREE.Vector2(width, height),
+    1.2,   // strength
+    0.4,   // radius
+    0.6    // threshold — 낮을수록 더 많이 빛남
+  );
+  composer.addPass(bloomPass);
+
   function animate() {
     requestAnimationFrame(animate);
     controls.update();
-    renderer.render(scene, camera);
+    composer.render();
   }
   animate();
 
@@ -45,6 +88,7 @@ function createPianoScene(container) {
     const w = container.clientWidth;
     const h = container.clientHeight;
     renderer.setSize(w, h);
+    composer.setSize(w, h);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
   });
