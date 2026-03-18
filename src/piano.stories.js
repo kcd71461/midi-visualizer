@@ -48,18 +48,15 @@ function createPianoScene(container) {
   fillLight.position.set(-5, 3, 4);
   scene.add(fillLight);
 
-  // 바닥 반사면 (건반 아래 약간의 반사)
-  const floorGeo = new THREE.PlaneGeometry(30, 10);
-  const floorMat = new THREE.MeshPhysicalMaterial({
-    color: 0x111122,
-    roughness: 0.3,
-    metalness: 0.6,
-    reflectivity: 0.5,
-  });
-  const floor = new THREE.Mesh(floorGeo, floorMat);
-  floor.rotation.x = -Math.PI / 2;
-  floor.position.y = -0.08;
-  scene.add(floor);
+  // 바닥 반사면 (옵션 — 기본 OFF)
+  // const floorGeo = new THREE.PlaneGeometry(30, 10);
+  // const floorMat = new THREE.MeshPhysicalMaterial({
+  //   color: 0x111122, roughness: 0.3, metalness: 0.6, reflectivity: 0.5,
+  // });
+  // const floor = new THREE.Mesh(floorGeo, floorMat);
+  // floor.rotation.x = -Math.PI / 2;
+  // floor.position.y = -0.08;
+  // scene.add(floor);
 
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
