@@ -220,15 +220,15 @@ export function isCinematicMode() {
 export function updateCinematicCamera(currentTime, musicEnergy, delta = 0.016) {
   if (!cinematicEnabled || !camera) return;
 
-  // ── 아웃트로 시퀀스 — 건반 정면 클로즈업으로 줌인 ──
+  // ── 아웃트로 시퀀스 — 크레인 업 + 풀백 (피아노가 점점 작아지는 영화적 엔딩) ──
   if (outroActive) {
     const elapsed = currentTime - outroStartTime;
     const progress = THREE.MathUtils.clamp(elapsed / OUTRO_DURATION, 0, 1);
     const eased = easeInOutCubic(progress);
 
-    // 현재 위치 → 건반 정면 클로즈업
-    const outroGoalPos = new THREE.Vector3(0, 1.5, 6);
-    const outroGoalTarget = new THREE.Vector3(0, 0.1, 0);
+    // 현재 위치 → 높이 올라가며 뒤로 빠지는 크레인 샷
+    const outroGoalPos = new THREE.Vector3(0, 18, 28);
+    const outroGoalTarget = new THREE.Vector3(0, 0, -3);
 
     cinematicPos.lerpVectors(outroStartPos, outroGoalPos, eased);
     cinematicTarget.lerpVectors(outroStartTarget, outroGoalTarget, eased);

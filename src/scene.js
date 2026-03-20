@@ -55,6 +55,9 @@ const GodRaysShader = {
         if (i >= samples) break;
         texCoord -= deltaTexCoord;
         vec4 sampleColor = texture2D(tDiffuse, texCoord);
+        // 휘도 임계값 — 밝은 픽셀만 광선 소스로 사용 (가짜 번짐 방지)
+        float luma = dot(sampleColor.rgb, vec3(0.299, 0.587, 0.114));
+        sampleColor.rgb *= smoothstep(0.4, 0.8, luma);
         sampleColor *= illuminationDecay * weight;
         godRays += sampleColor;
         illuminationDecay *= decay;

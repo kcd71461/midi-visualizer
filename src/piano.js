@@ -39,16 +39,24 @@ function createBlackKeyMaterial(keyIndex) {
   });
 }
 
-function createWhiteKeyMaterial() {
+function createWhiteKeyMaterial(keyIndex) {
+  // per-key 미세 변화: 사용 흔적, 미세한 황변, 결 차이 시뮬레이션
+  const warmShift = (Math.random() - 0.5) * 0.02; // 약간의 따뜻한/차가운 편차
+  const r = Math.min(1.0, 1.0 + warmShift);
+  const g = Math.min(1.0, 0.99 + warmShift * 0.5);
+  const b = Math.min(1.0, 0.97 - Math.abs(warmShift));
+  const color = new THREE.Color(r, g, b);
+  const roughness = 0.06 + Math.random() * 0.06; // 0.06~0.12
+
   return new THREE.MeshPhysicalMaterial({
-    color: 0xffffff,
+    color,
     emissive: 0xffffff,
-    emissiveIntensity: 0.06,  // 약한 자체발광 — 어두운 환경에서도 건반 보임
-    roughness: 0.08,
+    emissiveIntensity: 0.06,
+    roughness,
     metalness: 0.0,
     reflectivity: 1.0,
     clearcoat: 1.0,
-    clearcoatRoughness: 0.06,
+    clearcoatRoughness: 0.04 + Math.random() * 0.04,
     envMapIntensity: 1.8,
   });
 }
@@ -65,8 +73,6 @@ export function createPiano(scene) {
     PIANO.BLACK_KEY_WIDTH, PIANO.BLACK_KEY_HEIGHT, PIANO.BLACK_KEY_DEPTH
   );
 
-  const whiteMat = createWhiteKeyMaterial();
-
   let whiteIndex = 0;
   let blackIndex = 0;
 
@@ -75,7 +81,7 @@ export function createPiano(scene) {
     const white = isWhiteKey(midiNote);
 
     if (white) {
-      const mesh = new THREE.Mesh(whiteKeyGeo, whiteMat.clone());
+      const mesh = new THREE.Mesh(whiteKeyGeo, createWhiteKeyMaterial(whiteIndex));
       const x = (whiteIndex - 26) * (PIANO.WHITE_KEY_WIDTH + PIANO.KEY_GAP);
       mesh.position.set(x, 0, 0);
       mesh.castShadow = true;
@@ -140,9 +146,10 @@ export function pressKey(midiNote, color) {
     activeAnimations.delete(midiNote);
   }
 
-  const PRESS_DURATION = 100;   // 하강 시간 (ms)
-  const RELEASE_DURATION = 400; // 복귀 시간 (ms)
-  const PRESS_DEPTH = 0.1;      // 하강 깊이
+  const PRESS_DURATION = 80;    // 하강 시간 (ms) — 빠른 응답
+  const RELEASE_DURATION = 500;  // 복귀 시간 (ms) — 느린 복귀로 여운
+  const PRESS_DEPTH = 0.18;     // 하강 깊이 (증가)
+  const PRESS_ROTATION = 0.04;  // 앞쪽 기울기 (라디안) — 피봇 느낌
 
   // emissive 색상 설정
   key.mesh.material.emissive.setHex(color);
@@ -156,10 +163,11 @@ export function pressKey(midiNote, color) {
     const progress = Math.min(elapsed / PRESS_DURATION, 1);
     const eased = easeOutCubic(progress);
 
-    // 위치 하강
+    // 위치 하강 + 미세 회전 (피봇 시뮬레이션)
     key.mesh.position.y = key.baseY - PRESS_DEPTH * eased;
-    // emissive 강도 증가
-    key.mesh.material.emissiveIntensity = 1.5 * eased;
+    key.mesh.rotation.x = -PRESS_ROTATION * eased;
+    // emissive 강도 증가 — 피크를 높여 시각적 임팩트
+    key.mesh.material.emissiveIntensity = 2.5 * eased;
 
     if (progress < 1) {
       activeAnimations.set(midiNote, requestAnimationFrame(animatePress));
@@ -177,16 +185,18 @@ export function pressKey(midiNote, color) {
     const progress = Math.min(elapsed / RELEASE_DURATION, 1);
     const eased = easeInOutCubic(progress);
 
-    // 위치 복귀 (하강 상태 → 원래 위치)
+    // 위치/회전 복귀
     key.mesh.position.y = key.baseY - PRESS_DEPTH * (1 - eased);
+    key.mesh.rotation.x = -PRESS_ROTATION * (1 - eased);
     // emissive 글로우 부드럽게 페이드아웃
-    key.mesh.material.emissiveIntensity = 1.5 * (1 - eased);
+    key.mesh.material.emissiveIntensity = 2.5 * (1 - eased);
 
     if (progress < 1) {
       activeAnimations.set(midiNote, requestAnimationFrame(animateRelease));
     } else {
       // 애니메이션 완료 → 깔끔하게 리셋
       key.mesh.position.y = key.baseY;
+      key.mesh.rotation.x = 0;
       key.mesh.material.emissive.setHex(0x000000);
       key.mesh.material.emissiveIntensity = 0;
       activeAnimations.delete(midiNote);
