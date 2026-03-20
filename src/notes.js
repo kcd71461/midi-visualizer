@@ -134,7 +134,8 @@ export function updateNotePositions(currentTime) {
         // 노트의 시작 시점이 건반을 통과했고, 아직 트레일 시간 내
         if (note.time <= currentTime && note.time > currentTime - TRAIL_DURATION) {
           const elapsed = currentTime - note.time;
-          const opacity = 1.0 - (elapsed / TRAIL_DURATION); // 1.0 → 0.0
+          // 급감쇠 + 긴 꼬리: 초반 밝게 번쩍 → 빠르게 감쇠 → 여운
+          const opacity = Math.pow(1.0 - elapsed / TRAIL_DURATION, 2.5);
 
           if (opacity > 0 && trailIndex < trailData.instancedMesh.instanceMatrix.count) {
             const x = getKeyX(note.midi);
@@ -170,8 +171,16 @@ export function updateNotePositions(currentTime) {
       const x = getKeyX(note.midi);
       const width = getKeyWidth(note.midi);
 
+      // 히트 모먼트 스케일 펄스: 건반 도달 직전 0.15초간 Y 스케일 확대
+      const timeToHit = note.time - currentTime;
+      let scaleY = 1;
+      if (timeToHit >= 0 && timeToHit < 0.15) {
+        const hitProgress = 1 - timeToHit / 0.15; // 0→1 as approaching hit
+        scaleY = 1 + 0.3 * Math.sin(hitProgress * Math.PI); // 1→1.3→1 bell curve
+      }
+
       dummy.position.set(x, NOTE_Y, z - depth / 2);
-      dummy.scale.set(width, 1, depth);
+      dummy.scale.set(width, scaleY, depth);
       dummy.updateMatrix();
       trackMesh.instancedMesh.setMatrixAt(instanceIndex, dummy.matrix);
 

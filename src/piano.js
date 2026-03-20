@@ -29,8 +29,7 @@ function createBlackKeyMaterial(keyIndex) {
 
   return new THREE.MeshPhysicalMaterial({
     color,
-    emissive: 0x112233,
-    emissiveIntensity: 0.1,  // 검은 건반에 미세한 파란 발광 — 배경과 분리
+    // emissive 제거: clearcoat 반사 콘트라스트 극대화 (칠흑 위 선명한 catchlight)
     roughness,
     metalness: 0.0,
     reflectivity: 1.0,

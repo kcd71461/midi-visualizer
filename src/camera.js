@@ -215,8 +215,9 @@ export function isCinematicMode() {
  * 매 프레임 호출 — 시네마틱 카메라 업데이트
  * @param {number} currentTime  - 곡의 현재 재생 시간(초)
  * @param {number} musicEnergy  - 0~1 사이의 음악 에너지 (활성 노트 비율)
+ * @param {number} delta        - 프레임 시간 (초)
  */
-export function updateCinematicCamera(currentTime, musicEnergy) {
+export function updateCinematicCamera(currentTime, musicEnergy, delta = 0.016) {
   if (!cinematicEnabled || !camera) return;
 
   // ── 아웃트로 시퀀스 — 건반 정면 클로즈업으로 줌인 ──
@@ -302,8 +303,9 @@ export function updateCinematicCamera(currentTime, musicEnergy) {
   // 카메라 높이 하한 (건반 아래로 내려가지 않도록)
   if (goalPos.y < 1) goalPos.y = 1;
 
-  // 최종 위치로 부드럽게 이동 (추가 댐핑)
-  const smoothFactor = 0.03;
+  // 프레임독립적 지수 감쇠 댐핑 — 에너지에 비례하여 반응 속도 증가
+  const baseSmoothRate = 2.0 + energy * 4.0; // 낮은 에너지 2.0, 높은 에너지 6.0
+  const smoothFactor = 1 - Math.pow(Math.E, -baseSmoothRate * delta);
   cinematicPos.lerp(goalPos, smoothFactor);
   cinematicTarget.lerp(goalTarget, smoothFactor);
 

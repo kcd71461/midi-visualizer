@@ -11,6 +11,9 @@ let renderer, scene, composer, sceneCamera;
 let stars;
 let bloomPass, bokehPass, fxaaPass, godRaysPass, cinematicPass;
 
+// 동적 조명 참조 (음악 반응형)
+let keyLightRef, rimLightRef, pianoSpotRef;
+
 // ─── God Rays Shader (볼류메트릭 라이트 스캐터링) ───
 const GodRaysShader = {
   uniforms: {
@@ -166,18 +169,15 @@ export function createScene(container) {
   pmremGenerator.dispose();
 
   // --- 조명 ---
-  // HemisphereLight (AO 시뮬레이션)
-  const hemiLight = new THREE.HemisphereLight(0x8899bb, 0x222233, 0.4);
+  // HemisphereLight (AO 시뮬레이션) — sky/ground 대비 강화로 그림자 콘트라스트 확보
+  const hemiLight = new THREE.HemisphereLight(0x8899bb, 0x0a0a15, 0.6);
   scene.add(hemiLight);
-
-  // 앰비언트 (기본 밝기 확보)
-  const ambientLight = new THREE.AmbientLight(0x2a2a50, 0.5);
-  scene.add(ambientLight);
 
   // 키 라이트 — 낮은 그레이징 앵글로 건반 모서리를 가로질러 비춤
   // y를 낮추고 z를 키워 건반 표면을 사선으로 긁듯이 조명 → 에지 하이라이트 극대화
   const keyLight = new THREE.DirectionalLight(0xfff5e0, 2.5);
-  keyLight.position.set(6, 4, 12);  // 이전: (4, 10, 6) → 높이를 낮추고 전방으로 당김
+  keyLightRef = keyLight;
+  keyLight.position.set(6, 4, 12);
   keyLight.castShadow = true;
   keyLight.shadow.mapSize.width = 4096;
   keyLight.shadow.mapSize.height = 4096;
@@ -197,7 +197,8 @@ export function createScene(container) {
   scene.add(fillLight);
 
   // 림 라이트 — 뒤에서 건반 상단 모서리 실루엣 강조 (검은 건반이 배경에서 분리되도록)
-  const rimLight = new THREE.DirectionalLight(0x4466ff, 1.8);  // 이전 intensity: 0.5
+  const rimLight = new THREE.DirectionalLight(0x4466ff, 1.8);
+  rimLightRef = rimLight;
   rimLight.position.set(0, 5, -10);
   scene.add(rimLight);
 
@@ -209,7 +210,8 @@ export function createScene(container) {
   // 건반 전용 로우 앵글 스포트라이트 — 정면 낮은 곳에서 건반 앞면을 비춤
   // Math.PI / 8 = 22.5도 좁은 빔으로 건반 표면에 집중
   const pianoSpotLight = new THREE.SpotLight(0xffeedd, 4.0, 40, Math.PI / 8, 0.3, 1.5);
-  pianoSpotLight.position.set(0, 6, 14);   // 이전: (0, 15, 5) → 전방에서 낮게
+  pianoSpotRef = pianoSpotLight;
+  pianoSpotLight.position.set(0, 6, 14);
   pianoSpotLight.target.position.set(0, 0, 0);
   pianoSpotLight.castShadow = true;
   pianoSpotLight.shadow.mapSize.width = 2048;
@@ -392,6 +394,41 @@ export function updateDOF(focusDistance = 10.0) {
   // 가까울수록 aperture를 더 좁혀 건반 선명도 유지
   const normalizedDist = THREE.MathUtils.clamp((focusDistance - 5) / 25, 0, 1);
   bokehPass.uniforms['aperture'].value = 0.0003 + normalizedDist * 0.0007;
+}
+
+// 동적 조명용 컬러 상수
+const _coolColor = new THREE.Color(0x8899cc);
+const _warmColor = new THREE.Color(0xffaa44);
+const _tempColor = new THREE.Color();
+
+/**
+ * 음악 에너지에 따라 조명을 동적으로 변화시킵니다.
+ * - 키 라이트: 차가운 블루(pp) ↔ 따뜻한 앰버(ff)
+ * - 림 라이트: 에너지에 비례하여 강도 증가
+ * - 스포트라이트: 에너지에 따라 빔 각도 확장
+ * - God Rays: 에너지에 따라 노출 증가
+ * @param {number} musicEnergy - 0~1 EMA 스무딩된 음악 에너지
+ */
+export function updateDynamicLighting(musicEnergy) {
+  const e = THREE.MathUtils.clamp(musicEnergy, 0, 1);
+
+  if (keyLightRef) {
+    _tempColor.copy(_coolColor).lerp(_warmColor, e);
+    keyLightRef.color.copy(_tempColor);
+    keyLightRef.intensity = 2.0 + e * 1.5; // 2.0~3.5
+  }
+
+  if (rimLightRef) {
+    rimLightRef.intensity = 1.5 + e * 2.5; // 1.5~4.0
+  }
+
+  if (pianoSpotRef) {
+    pianoSpotRef.angle = Math.PI / 10 + e * Math.PI / 15; // 18~30도
+  }
+
+  if (godRaysPass) {
+    godRaysPass.uniforms.exposure.value = 0.1 + e * 0.2; // 0.1~0.3
+  }
 }
 
 /**

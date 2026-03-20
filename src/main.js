@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { AppState, TRACK_COLORS, PIANO } from './constants.js';
-import { createScene, setupPostProcessing, updateScene, renderScene, handleResize, updateDynamicBloom, updateDOF, updateGodRaysLightPosition } from './scene.js';
+import { createScene, setupPostProcessing, updateScene, renderScene, handleResize, updateDynamicBloom, updateDOF, updateGodRaysLightPosition, updateDynamicLighting } from './scene.js';
 import { createPiano, pressKey, getKeyX } from './piano.js';
 import { createNoteBlocks, updateNotePositions, setTrackVisible, setTrackColor, disposeNotes, setHitPoint, getHitPoint } from './notes.js';
 import { loadMidiFromUrl, loadMidiFromFile } from './midi-parser.js';
@@ -264,8 +264,9 @@ function animate() {
     // EMA 스무딩 — 급격한 에너지 변화를 완화
     smoothedEnergy += ENERGY_EMA_ALPHA * (rawEnergy - smoothedEnergy);
 
-    // 다이나믹 블룸 업데이트
+    // 다이나믹 블룸 + 조명 업데이트
     updateDynamicBloom(smoothedEnergy);
+    updateDynamicLighting(smoothedEnergy);
 
     // 동적 DOF — 카메라에서 피아노까지 실거리에 초점 맞춤
     if (getCinematicCameraMode()) {
@@ -278,7 +279,7 @@ function animate() {
 
     // 카메라 업데이트
     if (getCinematicCameraMode()) {
-      updateCinematicCamera(t, smoothedEnergy);
+      updateCinematicCamera(t, smoothedEnergy, delta);
     } else {
       updateCamera();
     }
