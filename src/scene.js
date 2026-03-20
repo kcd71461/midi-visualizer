@@ -19,11 +19,11 @@ const GodRaysShader = {
   uniforms: {
     tDiffuse: { value: null },
     lightPosition: { value: new THREE.Vector2(0.5, 0.9) },
-    exposure: { value: 0.18 },
-    decay: { value: 0.96 },
-    density: { value: 0.6 },
-    weight: { value: 0.4 },
-    samples: { value: 60 },
+    exposure: { value: 0.12 },    // 이전 0.18: God Rays 약하게 → 건반 위 번짐 감소
+    decay: { value: 0.95 },
+    density: { value: 0.5 },      // 이전 0.6: 광선 밀도 줄여 선명도 확보
+    weight: { value: 0.3 },       // 이전 0.4: 가중치 줄여 원본 보존
+    samples: { value: 40 },       // 이전 60: 샘플 수 줄여 뭉개짐 감소
   },
   vertexShader: /* glsl */ `
     varying vec2 vUv;
@@ -51,13 +51,13 @@ const GodRaysShader = {
       float illuminationDecay = 1.0;
       vec4 godRays = vec4(0.0);
 
-      for (int i = 0; i < 60; i++) {
+      for (int i = 0; i < 40; i++) {
         if (i >= samples) break;
         texCoord -= deltaTexCoord;
         vec4 sampleColor = texture2D(tDiffuse, texCoord);
         // 휘도 임계값 — 밝은 픽셀만 광선 소스로 사용 (가짜 번짐 방지)
         float luma = dot(sampleColor.rgb, vec3(0.299, 0.587, 0.114));
-        sampleColor.rgb *= smoothstep(0.4, 0.8, luma);
+        sampleColor.rgb *= smoothstep(0.55, 0.9, luma);  // 이전 0.4~0.8: 임계값 올려 건반 표면 번짐 방지
         sampleColor *= illuminationDecay * weight;
         godRays += sampleColor;
         illuminationDecay *= decay;
@@ -74,8 +74,8 @@ const CinematicShader = {
   uniforms: {
     tDiffuse: { value: null },
     time: { value: 0.0 },
-    vignetteStrength: { value: 0.35 },
-    grainIntensity: { value: 0.08 },
+    vignetteStrength: { value: 0.25 },    // 이전 0.35: 비네팅 약화로 건반 밝기 보존
+    grainIntensity: { value: 0.035 },     // 이전 0.08: 그레인 대폭 줄여 선명도 확보
     // 컬러 그레이딩: lift(shadows) / gamma(midtones) / gain(highlights)
     colorLift: { value: new THREE.Vector3(0.0, 0.0, 0.02) },    // 약간의 블루 리프트
     colorGamma: { value: new THREE.Vector3(1.0, 1.0, 0.98) },   // 미드톤 살짝 따뜻하게
@@ -143,7 +143,7 @@ export function createScene(container) {
   renderer.setSize(container.clientWidth, container.clientHeight);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.6;
+  renderer.toneMappingExposure = 1.3;  // 이전 1.6 → 1.3: 하이라이트 보존, 건반 디테일 살림
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   container.appendChild(renderer.domElement);
@@ -212,7 +212,7 @@ export function createScene(container) {
 
   // 건반 전용 로우 앵글 스포트라이트 — 정면 낮은 곳에서 건반 앞면을 비춤
   // Math.PI / 8 = 22.5도 좁은 빔으로 건반 표면에 집중
-  const pianoSpotLight = new THREE.SpotLight(0xffeedd, 4.0, 40, Math.PI / 8, 0.3, 1.5);
+  const pianoSpotLight = new THREE.SpotLight(0xffeedd, 5.0, 40, Math.PI / 8, 0.3, 1.5);  // 이전 4.0: 건반 조명 강화
   pianoSpotRef = pianoSpotLight;
   pianoSpotLight.position.set(0, 6, 14);
   pianoSpotLight.target.position.set(0, 0, 0);
@@ -313,9 +313,9 @@ export function setupPostProcessing(camera) {
   // 발광 노트(emissive)와 눌린 키만 glow되고, 흰 건반 자체는 선명하게 유지
   bloomPass = new UnrealBloomPass(
     new THREE.Vector2(w, h),
-    0.4,   // strength — 보수적 기본값
-    0.3,   // radius
-    0.65   // threshold — ACES tonemapping 후 emissive만 bloom (건반은 0.6 이하로 압축됨)
+    0.35,  // strength — 글로우 유지하되 건반 washout 방지
+    0.15,  // radius — 이전 0.3: 번짐 반경 대폭 축소로 건반 경계 보존
+    0.7    // threshold — 이전 0.65: emissive 강한 것만 bloom
   );
   composer.addPass(bloomPass);
 
@@ -326,9 +326,9 @@ export function setupPostProcessing(camera) {
 
   // 4. BokehPass (DOF) — 건반에 초점, aperture 좁혀 선명도 확보
   bokehPass = new BokehPass(scene, camera, {
-    focus: 10.0,       // 이전: 15.0 → 카메라-피아노 실거리에 맞춤
-    aperture: 0.0008,  // 이전: 0.002 → 줄여서 건반 선명 영역 확대
-    maxblur: 0.004,    // 이전: 0.008 → 배경만 살짝 흐림
+    focus: 10.0,
+    aperture: 0.0003,  // 이전 0.0008: 극도로 좁은 조리개 → 거의 전체 선명
+    maxblur: 0.0015,   // 이전 0.004: 최대 블러 대폭 축소 → 배경도 거의 선명
   });
   composer.addPass(bokehPass);
 
@@ -393,9 +393,9 @@ export function handleResize(camera, container) {
 export function updateDynamicBloom(musicEnergy) {
   if (!bloomPass) return;
   const clamped = Math.max(0, Math.min(1, musicEnergy));
-  // threshold 0.65로 낮춘 만큼 strength 범위를 보수적으로: 0.2~0.6
-  // emissive 노트/파티클만 glow, 건반 washout 방지
-  bloomPass.strength = 0.2 + clamped * 0.4;
+  // threshold 0.7 + radius 0.15로 건반 washout 최소화
+  // strength 0.15~0.45: 노트 글로우 유지하되 건반 선명도 우선
+  bloomPass.strength = 0.15 + clamped * 0.3;
 }
 
 /**
@@ -405,9 +405,9 @@ export function updateDynamicBloom(musicEnergy) {
 export function updateDOF(focusDistance = 10.0) {
   if (!bokehPass) return;
   bokehPass.uniforms['focus'].value = focusDistance;
-  // 가까울수록 aperture를 더 좁혀 건반 선명도 유지
+  // 거리에 따라 aperture 미세 조정 — 항상 좁게 유지하여 건반 선명도 보장
   const normalizedDist = THREE.MathUtils.clamp((focusDistance - 5) / 25, 0, 1);
-  bokehPass.uniforms['aperture'].value = 0.0003 + normalizedDist * 0.0007;
+  bokehPass.uniforms['aperture'].value = 0.0002 + normalizedDist * 0.0003;
 }
 
 // 동적 조명용 컬러 상수
@@ -441,7 +441,7 @@ export function updateDynamicLighting(musicEnergy) {
   }
 
   if (godRaysPass) {
-    godRaysPass.uniforms.exposure.value = 0.1 + e * 0.2; // 0.1~0.3
+    godRaysPass.uniforms.exposure.value = 0.06 + e * 0.12; // 0.06~0.18 (이전 0.1~0.3: 선명도 위해 대폭 축소)
   }
 }
 
