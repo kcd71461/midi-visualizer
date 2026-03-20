@@ -34,7 +34,40 @@ const sceneClock = new THREE.Clock();
 
 // 음악 에너지 EMA (Exponential Moving Average) — 급격한 변화 방지
 let smoothedEnergy = 0;
-const ENERGY_EMA_ALPHA = 0.08; // 낮을수록 더 부드럽게
+const ENERGY_EMA_ALPHA = 0.08;
+
+// 에너지 계산 최적화: 시간순 정렬 노트 + 이진탐색
+let sortedNotes = null;
+
+function buildSortedNotes(midiData) {
+  const notes = [];
+  midiData.tracks.forEach(track => {
+    if (!track.visible) return;
+    track.notes.forEach(note => {
+      notes.push({ time: note.time, end: note.time + note.duration });
+    });
+  });
+  notes.sort((a, b) => a.time - b.time);
+  sortedNotes = notes;
+}
+
+function countActiveNotes(t) {
+  if (!sortedNotes || sortedNotes.length === 0) return 0;
+  // 이진탐색: t 이전에 시작된 마지막 노트 찾기
+  let lo = 0, hi = sortedNotes.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (sortedNotes[mid].time <= t) lo = mid;
+    else hi = mid - 1;
+  }
+  // lo 근처 윈도우에서 활성 노트 카운트
+  let count = 0;
+  // 뒤로 스캔 (시작 시간이 t 이하인 노트 중 아직 끝나지 않은 것)
+  for (let i = lo; i >= 0 && sortedNotes[i].time > t - 30; i--) {
+    if (sortedNotes[i].time <= t && sortedNotes[i].end >= t) count++;
+  }
+  return count;
+}
 
 function setState(newState) {
   state.current = newState;
@@ -101,6 +134,7 @@ async function handleFileLoaded(source) {
     });
 
     state.midiData = midiData;
+    sortedNotes = null; // 새 곡 로드 시 재구축
 
     // 사운드폰트 로딩 (최초 1회, 실패 시 음소거 폴백)
     try {
@@ -122,7 +156,7 @@ async function handleFileLoaded(source) {
       onTrackVisibility: (index, visible) => {
         midiData.tracks[index].visible = visible;
         setTrackVisible(index, visible);
-        // 오디오도 재로딩
+        sortedNotes = null; // 트랙 변경 시 에너지 인덱스 재구축
         loadNotes(midiData, getNoteHitCallback());
         resetScheduleIndex(clock.now());
       },
@@ -249,17 +283,11 @@ function animate() {
     tickAudio(clock);
     updateNotePositions(t);
 
-    // 음악 에너지 계산 (시네마틱 카메라용)
+    // 음악 에너지 계산 (최적화: 이진탐색 기반)
     let rawEnergy = 0;
     if (state.midiData) {
-      let activeCount = 0;
-      state.midiData.tracks.forEach(track => {
-        if (!track.visible) return;
-        track.notes.forEach(note => {
-          if (note.time <= t && note.time + note.duration >= t) activeCount++;
-        });
-      });
-      rawEnergy = Math.min(activeCount / 15, 1.0);
+      if (!sortedNotes) buildSortedNotes(state.midiData);
+      rawEnergy = Math.min(countActiveNotes(t) / 15, 1.0);
     }
     // EMA 스무딩 — 급격한 에너지 변화를 완화
     smoothedEnergy += ENERGY_EMA_ALPHA * (rawEnergy - smoothedEnergy);

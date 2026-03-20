@@ -313,9 +313,9 @@ export function setupPostProcessing(camera) {
   // 발광 노트(emissive)와 눌린 키만 glow되고, 흰 건반 자체는 선명하게 유지
   bloomPass = new UnrealBloomPass(
     new THREE.Vector2(w, h),
-    0.5,   // strength — 약간 줄여 washout 방지
-    0.25,  // radius — 더 타이트하게
-    0.88   // threshold — 이전: 0.75 → 흰 건반(1.0)이 threshold를 겨우 넘어 bloom 최소화
+    0.4,   // strength — 보수적 기본값
+    0.3,   // radius
+    0.65   // threshold — ACES tonemapping 후 emissive만 bloom (건반은 0.6 이하로 압축됨)
   );
   composer.addPass(bloomPass);
 

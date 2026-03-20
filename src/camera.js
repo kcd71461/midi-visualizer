@@ -35,6 +35,13 @@ let pathTransitionTime = 0;   // 전환 시작 시각
 let prevPathIndex = -1;
 let currPathIndex = 0;
 
+// ── 비트 반응 카메라 임펄스 ──
+let impulseOffset = new THREE.Vector3();
+let impulseDecay = 0;
+const IMPULSE_ATTACK = 0.15;  // 임펄스 발동 시간 (초)
+const IMPULSE_RELEASE = 0.6;  // 임펄스 감쇠 시간 (초)
+let prevEnergy = 0;
+
 // ── 이징 함수 ──
 function easeInOutCubic(t) {
   return t < 0.5
@@ -309,15 +316,36 @@ export function updateCinematicCamera(currentTime, musicEnergy, delta = 0.016) {
   cinematicPos.lerp(goalPos, smoothFactor);
   cinematicTarget.lerp(goalTarget, smoothFactor);
 
+  // ── 비트 반응 카메라 임펄스 ──
+  const energyDelta = energy - prevEnergy;
+  prevEnergy = energy;
+
+  if (energyDelta > 0.15) {
+    // 에너지 급상승 → 줌인 임펄스 (카메라가 피아노 쪽으로 당겨짐)
+    impulseOffset.set(0, -0.1, -energyDelta * 3);
+    impulseDecay = 1.0;
+  } else if (energyDelta < -0.2) {
+    // 에너지 급하락 → 풀백 임펄스 (공간감 확장)
+    impulseOffset.set(0, 0.15, -energyDelta * 2);
+    impulseDecay = 1.0;
+  }
+
+  // 임펄스 감쇠
+  if (impulseDecay > 0) {
+    impulseDecay = Math.max(0, impulseDecay - delta / IMPULSE_RELEASE);
+  }
+
+  const impulseEased = impulseDecay * impulseDecay; // quadratic falloff
+
   // 카메라 브리딩 — 미세한 사인파 진동으로 생동감 부여
   const breathX = Math.sin(currentTime * 0.7) * 0.03;
   const breathY = Math.sin(currentTime * 0.5 + 1.0) * 0.02;
 
-  // 카메라에 적용
+  // 카메라에 적용 (위치 + 브리딩 + 임펄스)
   camera.position.set(
-    cinematicPos.x + breathX,
-    cinematicPos.y + breathY,
-    cinematicPos.z
+    cinematicPos.x + breathX + impulseOffset.x * impulseEased,
+    cinematicPos.y + breathY + impulseOffset.y * impulseEased,
+    cinematicPos.z + impulseOffset.z * impulseEased
   );
   camera.lookAt(cinematicTarget);
 
