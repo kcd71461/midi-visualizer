@@ -393,8 +393,9 @@ export function handleResize(camera, container) {
 export function updateDynamicBloom(musicEnergy) {
   if (!bloomPass) return;
   const clamped = Math.max(0, Math.min(1, musicEnergy));
-  // strength: 0.3 ~ 0.8 (이전: 0.4~1.2) — 상한을 낮춰 강한 에너지에도 흰 건반 washout 방지
-  bloomPass.strength = 0.3 + clamped * 0.5;
+  // threshold 0.65로 낮춘 만큼 strength 범위를 보수적으로: 0.2~0.6
+  // emissive 노트/파티클만 glow, 건반 washout 방지
+  bloomPass.strength = 0.2 + clamped * 0.4;
 }
 
 /**
