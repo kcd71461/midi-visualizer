@@ -32,18 +32,16 @@ export function createNoteBlocks(scene, midiData) {
 
     const color = track.color || TRACK_COLORS[trackIndex % TRACK_COLORS.length];
 
-    // 크리스탈/유리 느낌 머티리얼 — NormalBlending으로 건반 가시성 확보
+    // 크리스탈/유리 느낌 머티리얼 — transmission 제거로 성능 확보
+    // fresnel 기반 투명도 + emissive glow로 유리 느낌 유지
     const material = new THREE.MeshPhysicalMaterial({
       color: color,
       emissive: color,
-      emissiveIntensity: 0.35,
+      emissiveIntensity: 0.4,
       transparent: true,
-      opacity: 0.82,
-      transmission: 0.15,
+      opacity: 0.75,
       roughness: 0.05,
       metalness: 0.0,
-      ior: 1.5,
-      thickness: 0.5,
       clearcoat: 1.0,
       clearcoatRoughness: 0.1,
       reflectivity: 0.9,

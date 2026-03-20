@@ -230,9 +230,9 @@ export function createScene(container) {
   // 피아노 아래에 은은한 반사 평면 배치
   const reflectorGeometry = new THREE.PlaneGeometry(30, 50);
   const reflector = new Reflector(reflectorGeometry, {
-    textureWidth: 1024,
-    textureHeight: 1024,
-    color: 0x020010, // 배경과 동일한 반사 색상
+    textureWidth: 2048,
+    textureHeight: 2048,
+    color: 0x020010,
   });
   reflector.rotation.x = -Math.PI / 2; // 수평으로 눕힘
   reflector.position.y = -0.01;        // 피아노 바로 아래
@@ -273,12 +273,22 @@ function createStars() {
   geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
   geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
 
+  // 별 색상 변화 추가 (청백~황백)
+  const colors = new Float32Array(count * 3);
+  for (let i = 0; i < count; i++) {
+    const temp = Math.random(); // 0=cool blue, 1=warm yellow
+    colors[i * 3] = 0.8 + temp * 0.2;
+    colors[i * 3 + 1] = 0.85 + temp * 0.1;
+    colors[i * 3 + 2] = 1.0 - temp * 0.3;
+  }
+  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
   const material = new THREE.PointsMaterial({
-    color: 0xffffff,
     size: 0.3,
     sizeAttenuation: true,
     transparent: true,
     opacity: 0.8,
+    vertexColors: true,
   });
 
   return new THREE.Points(geometry, material);

@@ -83,13 +83,13 @@ const cinematicPaths = [
     name: 'energetic',
     evaluate(t, energy) {
       const angle = t * 0.35;
-      const radius = 8 - energy * 3;    // 이전: 12-4 → 8-3 (더 가까이)
-      const height = 3 + energy * 2;     // 이전: 6+3 → 3+2 (더 낮게)
+      const radius = 7 - energy * 2;    // 5~7 범위
+      const height = 3 + energy * 2;
       return {
         position: new THREE.Vector3(
           Math.sin(angle) * radius,
           height,
-          Math.cos(angle) * radius + 3
+          Math.abs(Math.cos(angle)) * radius + 4  // abs로 Z 항상 양수, +4 오프셋
         ),
         target: new THREE.Vector3(0, 0.1, -1),
       };
@@ -309,8 +309,16 @@ export function updateCinematicCamera(currentTime, musicEnergy, delta = 0.016) {
   cinematicPos.lerp(goalPos, smoothFactor);
   cinematicTarget.lerp(goalTarget, smoothFactor);
 
+  // 카메라 브리딩 — 미세한 사인파 진동으로 생동감 부여
+  const breathX = Math.sin(currentTime * 0.7) * 0.03;
+  const breathY = Math.sin(currentTime * 0.5 + 1.0) * 0.02;
+
   // 카메라에 적용
-  camera.position.copy(cinematicPos);
+  camera.position.set(
+    cinematicPos.x + breathX,
+    cinematicPos.y + breathY,
+    cinematicPos.z
+  );
   camera.lookAt(cinematicTarget);
 
   // OrbitControls 타겟도 동기화 (모드 전환 시 자연스럽게)
