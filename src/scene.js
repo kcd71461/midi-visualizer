@@ -9,21 +9,21 @@ import { FXAAShader } from 'three/addons/shaders/FXAAShader.js';
 
 let renderer, scene, composer, sceneCamera;
 let stars;
-let bloomPass, bokehPass, fxaaPass, godRaysPass, cinematicPass;
+let bloomPass, bokehPass, fxaaPass, godRaysPass, colorGradePass, vignetteGrainPass;
 
 // 동적 조명 참조 (음악 반응형)
 let keyLightRef, rimLightRef, pianoSpotRef;
 
 // ─── God Rays Shader (볼류메트릭 라이트 스캐터링) ───
+// #define SAMPLES로 정적 루프 — GPU 루프 언롤링 가능 (Apple M시리즈 등 성능 최적화)
 const GodRaysShader = {
   uniforms: {
     tDiffuse: { value: null },
     lightPosition: { value: new THREE.Vector2(0.5, 0.9) },
-    exposure: { value: 0.12 },    // 이전 0.18: God Rays 약하게 → 건반 위 번짐 감소
+    exposure: { value: 0.12 },
     decay: { value: 0.95 },
-    density: { value: 0.5 },      // 이전 0.6: 광선 밀도 줄여 선명도 확보
-    weight: { value: 0.3 },       // 이전 0.4: 가중치 줄여 원본 보존
-    samples: { value: 40 },       // 이전 60: 샘플 수 줄여 뭉개짐 감소
+    density: { value: 0.5 },
+    weight: { value: 0.3 },
   },
   vertexShader: /* glsl */ `
     varying vec2 vUv;
@@ -39,47 +39,73 @@ const GodRaysShader = {
     uniform float decay;
     uniform float density;
     uniform float weight;
-    uniform int samples;
     varying vec2 vUv;
+
+    #define SAMPLES 40
 
     void main() {
       vec2 texCoord = vUv;
       vec2 deltaTexCoord = (texCoord - lightPosition);
-      deltaTexCoord *= 1.0 / float(samples) * density;
+      deltaTexCoord *= 1.0 / float(SAMPLES) * density;
 
       vec4 origColor = texture2D(tDiffuse, texCoord);
       float illuminationDecay = 1.0;
       vec4 godRays = vec4(0.0);
 
-      for (int i = 0; i < 40; i++) {
-        if (i >= samples) break;
+      for (int i = 0; i < SAMPLES; i++) {
         texCoord -= deltaTexCoord;
         vec4 sampleColor = texture2D(tDiffuse, texCoord);
-        // 휘도 임계값 — 밝은 픽셀만 광선 소스로 사용 (가짜 번짐 방지)
         float luma = dot(sampleColor.rgb, vec3(0.299, 0.587, 0.114));
-        sampleColor.rgb *= smoothstep(0.55, 0.9, luma);  // 이전 0.4~0.8: 임계값 올려 건반 표면 번짐 방지
+        sampleColor.rgb *= smoothstep(0.55, 0.9, luma);
         sampleColor *= illuminationDecay * weight;
         godRays += sampleColor;
         illuminationDecay *= decay;
       }
 
-      // 원본에 God Rays만 additive (이중 합산 방지)
       gl_FragColor = origColor + godRays * exposure;
     }
   `,
 };
 
-// ─── 시네마틱 셰이더 (비네팅 + 필름 그레인 + 컬러 그레이딩 통합) ───
-const CinematicShader = {
+// ─── 컬러 그레이딩 셰이더 (Bloom 전에 적용 — 톤매핑된 색상이 블룸에 올바르게 피딩) ───
+const ColorGradeShader = {
+  uniforms: {
+    tDiffuse: { value: null },
+    colorLift: { value: new THREE.Vector3(0.0, 0.0, 0.02) },
+    colorGamma: { value: new THREE.Vector3(1.0, 1.0, 0.98) },
+    colorGain: { value: new THREE.Vector3(1.02, 1.0, 0.98) },
+  },
+  vertexShader: /* glsl */ `
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: /* glsl */ `
+    uniform sampler2D tDiffuse;
+    uniform vec3 colorLift;
+    uniform vec3 colorGamma;
+    uniform vec3 colorGain;
+    varying vec2 vUv;
+
+    void main() {
+      vec4 color = texture2D(tDiffuse, vUv);
+      vec3 c = color.rgb;
+      c = colorGain * (colorLift * (1.0 - c) + c);
+      c = pow(max(c, vec3(0.0)), 1.0 / colorGamma);
+      gl_FragColor = vec4(clamp(c, 0.0, 1.0), color.a);
+    }
+  `,
+};
+
+// ─── 비네팅 + 필름 그레인 셰이더 (FXAA 후 최종 패스 — 그레인이 블룸되거나 AA 스미어 안됨) ───
+const VignetteGrainShader = {
   uniforms: {
     tDiffuse: { value: null },
     time: { value: 0.0 },
-    vignetteStrength: { value: 0.25 },    // 이전 0.35: 비네팅 약화로 건반 밝기 보존
-    grainIntensity: { value: 0.035 },     // 이전 0.08: 그레인 대폭 줄여 선명도 확보
-    // 컬러 그레이딩: lift(shadows) / gamma(midtones) / gain(highlights)
-    colorLift: { value: new THREE.Vector3(0.0, 0.0, 0.02) },    // 약간의 블루 리프트
-    colorGamma: { value: new THREE.Vector3(1.0, 1.0, 0.98) },   // 미드톤 살짝 따뜻하게
-    colorGain: { value: new THREE.Vector3(1.02, 1.0, 0.98) },   // 하이라이트에 따뜻한 틴트
+    vignetteStrength: { value: 0.25 },
+    grainIntensity: { value: 0.035 },
   },
   vertexShader: /* glsl */ `
     varying vec2 vUv;
@@ -93,12 +119,8 @@ const CinematicShader = {
     uniform float time;
     uniform float vignetteStrength;
     uniform float grainIntensity;
-    uniform vec3 colorLift;
-    uniform vec3 colorGamma;
-    uniform vec3 colorGain;
     varying vec2 vUv;
 
-    // 고품질 해시 함수 (필름 그레인용)
     float hash(vec2 p) {
       vec3 p3 = fract(vec3(p.xyx) * 0.1031);
       p3 += dot(p3, p3.yzx + 33.33);
@@ -107,19 +129,14 @@ const CinematicShader = {
 
     void main() {
       vec4 color = texture2D(tDiffuse, vUv);
-
-      // 1. 컬러 그레이딩 (Lift / Gamma / Gain)
       vec3 c = color.rgb;
-      c = colorGain * (colorLift * (1.0 - c) + c);
-      c = pow(max(c, vec3(0.0)), 1.0 / colorGamma);
 
-      // 2. 비네팅
-      vec2 uv = vUv;
-      float dist = distance(uv, vec2(0.5));
+      // 비네팅
+      float dist = distance(vUv, vec2(0.5));
       float vignette = smoothstep(0.45, 1.0, dist);
       c *= 1.0 - vignette * vignetteStrength;
 
-      // 3. 필름 그레인
+      // 필름 그레인
       float grain = hash(vUv * 1000.0 + time * 100.0) - 0.5;
       c += grain * grainIntensity;
 
@@ -152,23 +169,28 @@ export function createScene(container) {
   scene.background = new THREE.Color(0x020010);
   scene.fog = new THREE.FogExp2(0x020010, 0.004);
 
-  // 환경맵 (건반 반사용) — 고대비 환경으로 clearcoat 반사가 선명하게 맺히도록
-  // 밝은 하이라이트 포인트를 여러 방향에 배치 → 흑건에 빛나는 반사점 생성
+  // 환경맵 — 실제 3점 조명 리그와 일치시켜 clearcoat 캐치라이트가 물리적으로 올바르게 맺히도록
+  // 키라이트/림라이트/필라이트 위치와 색온도를 env에 미러링
   const pmremGenerator = new THREE.PMREMGenerator(renderer);
   const envScene = new THREE.Scene();
-  envScene.background = new THREE.Color(0x050515);
-  const envHemi = new THREE.HemisphereLight(0xbbccff, 0x111122, 2.5);  // 이전: 1.0
+  envScene.background = new THREE.Color(0x020008);
+
+  const envKey = new THREE.DirectionalLight(0xfff0cc, 6.0);   // warm, matches keyLight
+  envKey.position.set(6, 4, 12);
+  envScene.add(envKey);
+
+  const envRim = new THREE.DirectionalLight(0x3355ff, 3.5);   // blue rim, matches rimLight
+  envRim.position.set(0, 5, -10);
+  envScene.add(envRim);
+
+  const envFill = new THREE.DirectionalLight(0xaabbee, 1.5);  // cool fill
+  envFill.position.set(-8, 3, 10);
+  envScene.add(envFill);
+
+  const envHemi = new THREE.HemisphereLight(0x112244, 0x000000, 0.8);
   envScene.add(envHemi);
-  const envDir1 = new THREE.DirectionalLight(0xffffff, 3.0);  // 이전: 0.8
-  envDir1.position.set(2, 3, 2);
-  envScene.add(envDir1);
-  const envDir2 = new THREE.DirectionalLight(0x8899ff, 1.5);
-  envDir2.position.set(-3, 1, -1);
-  envScene.add(envDir2);
-  const envDir3 = new THREE.DirectionalLight(0xffeedd, 2.0);
-  envDir3.position.set(0, -1, 3);  // 아래에서 올라오는 반사 — 흑건 상면에 catchlight
-  envScene.add(envDir3);
-  scene.environment = pmremGenerator.fromScene(envScene, 0.04).texture;
+
+  scene.environment = pmremGenerator.fromScene(envScene, 0.02).texture;
   pmremGenerator.dispose();
 
   // --- 조명 ---
@@ -260,6 +282,24 @@ export function createScene(container) {
   return { renderer, scene };
 }
 
+function createStarTexture() {
+  const size = 64;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const gradient = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  gradient.addColorStop(0, 'rgba(255,255,255,1)');
+  gradient.addColorStop(0.2, 'rgba(255,255,255,0.7)');
+  gradient.addColorStop(0.5, 'rgba(255,255,255,0.15)');
+  gradient.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, size, size);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.needsUpdate = true;
+  return texture;
+}
+
 function createStars() {
   const count = 3000;
   const geometry = new THREE.BufferGeometry();
@@ -286,11 +326,16 @@ function createStars() {
   }
   geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 
+  // 소프트 글로우 텍스처 — 딱딱한 사각형 대신 부드러운 원형 별
+  const starTexture = createStarTexture();
+
   const material = new THREE.PointsMaterial({
     size: 0.3,
+    map: starTexture,
     sizeAttenuation: true,
     transparent: true,
     opacity: 0.8,
+    depthWrite: false,
     vertexColors: true,
   });
 
@@ -305,44 +350,52 @@ export function setupPostProcessing(camera) {
 
   composer = new EffectComposer(renderer);
 
-  // 1. RenderPass
+  // ── 프로페셔널 컴포지팅 파이프라인 ──
+  // 순서: Render → GodRays → ColorGrade → Bloom → DOF → FXAA → Vignette+Grain
+  // 이유:
+  // - 컬러 그레이딩은 블룸 전에 (톤매핑된 색상이 블룸에 올바르게 피딩)
+  // - 비네팅+그레인은 FXAA 후 최종 (그레인이 블룸/AA에 의해 변형되지 않음)
+
+  // 1. RenderPass — 원본 렌더
   composer.addPass(new RenderPass(scene, camera));
 
-  // 2. UnrealBloomPass
-  // threshold를 0.75 → 0.88로 올려 흰 건반 표면이 bloom에 씻기지 않게 함
-  // 발광 노트(emissive)와 눌린 키만 glow되고, 흰 건반 자체는 선명하게 유지
-  bloomPass = new UnrealBloomPass(
-    new THREE.Vector2(w, h),
-    0.35,  // strength — 글로우 유지하되 건반 washout 방지
-    0.15,  // radius — 이전 0.3: 번짐 반경 대폭 축소로 건반 경계 보존
-    0.7    // threshold — 이전 0.65: emissive 강한 것만 bloom
-  );
-  composer.addPass(bloomPass);
-
-  // 3. God Rays (볼류메트릭 라이트 스캐터링)
+  // 2. God Rays — 클린 렌더에서 산란
   godRaysPass = new ShaderPass(GodRaysShader);
   godRaysPass.uniforms.lightPosition.value.set(0.5, 0.9);
   composer.addPass(godRaysPass);
 
-  // 4. BokehPass (DOF) — 건반에 초점, aperture 좁혀 선명도 확보
+  // 3. 컬러 그레이딩 (Lift/Gamma/Gain만 — 비네팅/그레인 분리)
+  colorGradePass = new ShaderPass(ColorGradeShader);
+  composer.addPass(colorGradePass);
+
+  // 4. UnrealBloomPass — 그레이딩된 색상 위에 블룸
+  bloomPass = new UnrealBloomPass(
+    new THREE.Vector2(w, h),
+    0.20,  // strength — 동적 범위로 제어
+    0.20,  // radius
+    0.55   // threshold
+  );
+  composer.addPass(bloomPass);
+
+  // 5. BokehPass (DOF)
   bokehPass = new BokehPass(scene, camera, {
     focus: 10.0,
-    aperture: 0.0003,  // 이전 0.0008: 극도로 좁은 조리개 → 거의 전체 선명
-    maxblur: 0.0015,   // 이전 0.004: 최대 블러 대폭 축소 → 배경도 거의 선명
+    aperture: 0.0003,
+    maxblur: 0.0015,
   });
   composer.addPass(bokehPass);
 
-  // 5. 시네마틱 셰이더 (비네팅 + 필름 그레인 + 컬러 그레이딩)
-  cinematicPass = new ShaderPass(CinematicShader);
-  composer.addPass(cinematicPass);
-
-  // 6. FXAA (최종 안티앨리어싱)
+  // 6. FXAA
   fxaaPass = new ShaderPass(FXAAShader);
   fxaaPass.uniforms['resolution'].value.set(
     1 / (w * pixelRatio),
     1 / (h * pixelRatio)
   );
   composer.addPass(fxaaPass);
+
+  // 7. 비네팅 + 필름 그레인 (최종 패스 — 모든 이펙트 위에 깨끗하게 적용)
+  vignetteGrainPass = new ShaderPass(VignetteGrainShader);
+  composer.addPass(vignetteGrainPass);
 
   return composer;
 }
@@ -352,9 +405,9 @@ export function updateScene(delta) {
     stars.rotation.y += delta * 0.01;
     stars.rotation.x += delta * 0.005;
   }
-  // 시네마틱 셰이더 시간 업데이트 (필름 그레인 애니메이션)
-  if (cinematicPass) {
-    cinematicPass.uniforms.time.value += delta;
+  // 필름 그레인 시간 업데이트
+  if (vignetteGrainPass) {
+    vignetteGrainPass.uniforms.time.value += delta;
   }
 }
 
@@ -393,27 +446,34 @@ export function handleResize(camera, container) {
 export function updateDynamicBloom(musicEnergy) {
   if (!bloomPass) return;
   const clamped = Math.max(0, Math.min(1, musicEnergy));
-  // threshold 0.7 + radius 0.15로 건반 washout 최소화
-  // strength 0.15~0.45: 노트 글로우 유지하되 건반 선명도 우선
-  bloomPass.strength = 0.15 + clamped * 0.3;
+  // 0.20→0.65: 조용한 구간 어둡게, 클라이맥스 강렬하게
+  bloomPass.strength = 0.20 + clamped * 0.45;
+  // 고에너지 시 반경 좁혀 집중된 헤일로
+  bloomPass.radius = 0.20 - clamped * 0.08;
 }
 
 /**
  * DOF 초점 거리를 업데이트합니다.
  * @param {number} focusDistance - 초점 거리 (기본값 15.0)
  */
-export function updateDOF(focusDistance = 10.0) {
+export function updateDOF(focusDistance = 10.0, aperture = null) {
   if (!bokehPass) return;
   bokehPass.uniforms['focus'].value = focusDistance;
-  // 거리에 따라 aperture 미세 조정 — 항상 좁게 유지하여 건반 선명도 보장
-  const normalizedDist = THREE.MathUtils.clamp((focusDistance - 5) / 25, 0, 1);
-  bokehPass.uniforms['aperture'].value = 0.0002 + normalizedDist * 0.0003;
+  if (aperture !== null) {
+    bokehPass.uniforms['aperture'].value = aperture;
+    bokehPass.uniforms['maxblur'].value = Math.min(aperture * 5.0, 0.01);
+  } else {
+    const normalizedDist = THREE.MathUtils.clamp((focusDistance - 5) / 25, 0, 1);
+    bokehPass.uniforms['aperture'].value = 0.0002 + normalizedDist * 0.0003;
+  }
 }
 
-// 동적 조명용 컬러 상수
-const _coolColor = new THREE.Color(0x8899cc);
-const _warmColor = new THREE.Color(0xffaa44);
+// 동적 조명용 컬러 상수 — 시네마틱 문라이트 블루 ↔ 텅스텐 앰버
+const _coolColor = new THREE.Color(0x1133bb);
+const _warmColor = new THREE.Color(0xff9900);
 const _tempColor = new THREE.Color();
+const _rimCoolColor = new THREE.Color(0x2200aa);
+const _rimWarmColor = new THREE.Color(0x0088ff);
 
 /**
  * 음악 에너지에 따라 조명을 동적으로 변화시킵니다.
@@ -429,19 +489,24 @@ export function updateDynamicLighting(musicEnergy) {
   if (keyLightRef) {
     _tempColor.copy(_coolColor).lerp(_warmColor, e);
     keyLightRef.color.copy(_tempColor);
-    keyLightRef.intensity = 2.0 + e * 1.5; // 2.0~3.5
+    // 저에너지: 어둡게 — 긴장감 / 고에너지: 무대 조명 점등
+    keyLightRef.intensity = 1.2 + e * 3.0; // 1.2→4.2
   }
 
   if (rimLightRef) {
-    rimLightRef.intensity = 1.5 + e * 2.5; // 1.5~4.0
+    // 저에너지: 림 사라짐 → 피아노가 어둠에 녹아듦 / 고에너지: 실루엣 강조
+    rimLightRef.intensity = 0.4 + e * 4.5; // 0.4→4.9
+    // 색상 스무스 러프: 딥 인디고 → 일렉트릭 시안
+    rimLightRef.color.copy(_rimCoolColor).lerp(_rimWarmColor, e);
   }
 
   if (pianoSpotRef) {
-    pianoSpotRef.angle = Math.PI / 10 + e * Math.PI / 15; // 18~30도
+    pianoSpotRef.angle = Math.PI / 10 + e * Math.PI / 12; // 18→33도
+    pianoSpotRef.intensity = 3.0 + e * 5.0; // 3→8 동적
   }
 
   if (godRaysPass) {
-    godRaysPass.uniforms.exposure.value = 0.06 + e * 0.12; // 0.06~0.18 (이전 0.1~0.3: 선명도 위해 대폭 축소)
+    godRaysPass.uniforms.exposure.value = 0.04 + e * 0.14; // 0.04→0.18
   }
 }
 
@@ -450,18 +515,19 @@ export function updateDynamicLighting(musicEnergy) {
  * 3D 광원 위치를 화면 UV 좌표로 투영하여 God Rays의 원점을 갱신.
  * @param {THREE.Camera} cam - 현재 카메라
  */
+// God Rays 시간적 안정성 — 카메라 이동 시 광선 방향 떨림 방지
+const _godRaysTargetPos = new THREE.Vector2(0.5, 0.9);
+const _godRaysSmoothPos = new THREE.Vector2(0.5, 0.9);
+
 export function updateGodRaysLightPosition(cam) {
   if (!godRaysPass || !cam) return;
-  // 고정 광원 위치 (피아노 위쪽 뒤편)
   const lightWorldPos = new THREE.Vector3(0, 15, -10);
   const projected = lightWorldPos.clone().project(cam);
-  // NDC(-1~1) → UV(0~1)
-  const u = (projected.x + 1) / 2;
-  const v = (projected.y + 1) / 2;
-  godRaysPass.uniforms.lightPosition.value.set(
-    THREE.MathUtils.clamp(u, 0.1, 0.9),
-    THREE.MathUtils.clamp(v, 0.1, 0.95)
-  );
+  const u = THREE.MathUtils.clamp((projected.x + 1) / 2, 0.1, 0.9);
+  const v = THREE.MathUtils.clamp((projected.y + 1) / 2, 0.1, 0.95);
+  _godRaysTargetPos.set(u, v);
+  _godRaysSmoothPos.lerp(_godRaysTargetPos, 0.12);
+  godRaysPass.uniforms.lightPosition.value.copy(_godRaysSmoothPos);
 }
 
 export function getScene() { return scene; }

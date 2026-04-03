@@ -5,6 +5,7 @@ import { getKeyX, getKeyWidth } from './piano.js';
 const trackMeshes = [];
 const dummy = new THREE.Object3D();
 const tempColor = new THREE.Color();
+const _scratchColor = new THREE.Color(); // 트레일 플래시용 스크래치 컬러 (GC 방지)
 
 // ─────────────────────────────────────────────
 // 트레일(잔상) 시스템
@@ -32,22 +33,17 @@ export function createNoteBlocks(scene, midiData) {
 
     const color = track.color || TRACK_COLORS[trackIndex % TRACK_COLORS.length];
 
-    // 크리스탈/유리 느낌 머티리얼 — transmission 제거로 성능 확보
-    // fresnel 기반 투명도 + emissive glow로 유리 느낌 유지
-    const material = new THREE.MeshPhysicalMaterial({
+    // MeshStandardMaterial + emissive — 씬 조명에 반응하면서 자체 발광
+    // 키라이트/림라이트가 노트 표면을 조각하여 3D 깊이감 생성
+    const material = new THREE.MeshStandardMaterial({
       color: color,
       emissive: color,
-      emissiveIntensity: 0.4,
+      emissiveIntensity: 0.5,
       transparent: true,
-      opacity: 0.75,
-      roughness: 0.05,
+      opacity: 0.78,
+      roughness: 0.15,
       metalness: 0.0,
-      clearcoat: 1.0,
-      clearcoatRoughness: 0.1,
-      reflectivity: 0.9,
-      envMapIntensity: 0.8,
-      blending: THREE.NormalBlending,
-      depthWrite: true,
+      depthWrite: false,
     });
 
     const maxVisible = track.notes.length;
@@ -128,24 +124,44 @@ export function updateNotePositions(currentTime) {
       const noteEnd = note.time + note.duration;
 
       // ── 트레일 체크: 노트가 건반을 지나간 후 TRAIL_DURATION 이내 ──
+      // 플래시 페이즈 (0~80ms): 히트 순간 Z 확장 + 백열 화이트
+      // 디케이 페이즈 (80ms~500ms): pow(2.5) 급감쇠
+      const FLASH_END = 0.08;
       if (trailData && trailIndex < trailData.instancedMesh.count + 500) {
-        // 노트의 시작 시점이 건반을 통과했고, 아직 트레일 시간 내
         if (note.time <= currentTime && note.time > currentTime - TRAIL_DURATION) {
           const elapsed = currentTime - note.time;
-          // 급감쇠 + 긴 꼬리: 초반 밝게 번쩍 → 빠르게 감쇠 → 여운
-          const opacity = Math.pow(1.0 - elapsed / TRAIL_DURATION, 2.5);
+
+          let opacity, zScale;
+          if (elapsed < FLASH_END) {
+            // 플래시: Z 확장 + 밝은 백열
+            const flashT = elapsed / FLASH_END;
+            opacity = 1.0;
+            zScale = 1.0 + 3.0 * (1 - flashT * flashT);
+          } else {
+            // 디케이: pow(2.5) 감쇠
+            const decayT = (elapsed - FLASH_END) / (TRAIL_DURATION - FLASH_END);
+            opacity = Math.pow(1.0 - decayT, 2.5);
+            zScale = 1.0;
+          }
 
           if (opacity > 0 && trailIndex < trailData.instancedMesh.instanceMatrix.count) {
             const x = getKeyX(note.midi);
             const width = getKeyWidth(note.midi);
 
             trailDummy.position.set(x, NOTE_Y + TRAIL_Y_OFFSET, hitZ);
-            trailDummy.scale.set(width, TRAIL_DEPTH, 1);
+            trailDummy.scale.set(width, TRAIL_DEPTH, zScale);
             trailDummy.updateMatrix();
             trailData.instancedMesh.setMatrixAt(trailIndex, trailDummy.matrix);
 
-            // 색상에 opacity를 곱해 페이드 표현 (AdditiveBlending이므로 색상 밝기 = 가시 강도)
-            tempColor.setHex(trailData.color);
+            // 플래시 페이즈: 백열→원색 전환
+            if (elapsed < FLASH_END) {
+              const flashT = elapsed / FLASH_END;
+              tempColor.setRGB(1, 1, 1);
+              _scratchColor.setHex(trailData.color);
+              tempColor.lerp(_scratchColor, flashT);
+            } else {
+              tempColor.setHex(trailData.color);
+            }
             tempColor.multiplyScalar(opacity * (0.5 + note.velocity * 0.5));
             trailData.instancedMesh.setColorAt(trailIndex, tempColor);
 
@@ -169,12 +185,17 @@ export function updateNotePositions(currentTime) {
       const x = getKeyX(note.midi);
       const width = getKeyWidth(note.midi);
 
-      // 히트 모먼트 스케일 펄스: 건반 도달 직전 0.15초간 Y 스케일 확대
+      // ── 노트 비행 중 애니메이션 ──
       const timeToHit = note.time - currentTime;
-      let scaleY = 1;
-      if (timeToHit >= 0 && timeToHit < 0.15) {
-        const hitProgress = 1 - timeToHit / 0.15; // 0→1 as approaching hit
-        scaleY = 1 + 0.3 * Math.sin(hitProgress * Math.PI); // 1→1.3→1 bell curve
+      const proximity = lookAhead > 0 ? 1 - Math.max(0, timeToHit) / lookAhead : 1; // 0→1 as approaching hit
+
+      // 근접 시 Y 스케일 팽창 (존재감 증가) — 0.8→1.0 범위
+      const scaleY = 0.8 + proximity * 0.2;
+
+      // 히트 직전 0.3초: 글로우 증폭 — 관객의 시선 집중
+      let glowBoost = 1.0;
+      if (timeToHit >= 0 && timeToHit < 0.3) {
+        glowBoost = 1.0 + 0.5 * Math.pow(1 - timeToHit / 0.3, 2);
       }
 
       dummy.position.set(x, NOTE_Y, z - depth / 2);
@@ -182,8 +203,9 @@ export function updateNotePositions(currentTime) {
       dummy.updateMatrix();
       trackMesh.instancedMesh.setMatrixAt(instanceIndex, dummy.matrix);
 
+      // velocity 기반 밝기 + 근접 글로우 부스트
       tempColor.setHex(trackMesh.color);
-      tempColor.multiplyScalar(0.5 + note.velocity * 0.5);
+      tempColor.multiplyScalar((0.5 + note.velocity * 0.5) * glowBoost);
       trackMesh.instancedMesh.setColorAt(instanceIndex, tempColor);
 
       instanceIndex++;

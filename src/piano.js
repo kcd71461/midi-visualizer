@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { PIANO } from './constants.js';
 
 const keys = [];
@@ -13,6 +14,17 @@ function isWhiteKey(midiNote) {
   const n = midiNote % 12;
   return [0, 2, 4, 5, 7, 9, 11].includes(n);
 }
+
+// 옥타브 내 검은 건반 오프셋 — 실제 피아노 크로매틱 레이아웃 기반
+// C#: C와 D 사이에서 왼쪽으로 치우침, D#: 중심에서 오른쪽으로 치우침
+// F#, G#, A#: 3개 그룹 내에서 각각 고유한 위치
+const BLACK_KEY_OFFSETS = {
+  1: -0.55,  // C# — C쪽으로 약간 치우침
+  3: -0.42,  // D# — D쪽으로 약간 치우침
+  6: -0.55,  // F# — F쪽으로 치우침
+  8: -0.50,  // G# — 거의 중앙
+  10: -0.42, // A# — A쪽으로 치우침
+};
 
 // 검은 건반 per-key 미세 변화 생성
 function createBlackKeyMaterial(keyIndex) {
@@ -35,7 +47,7 @@ function createBlackKeyMaterial(keyIndex) {
     reflectivity: 1.0,
     clearcoat: 1.0,
     clearcoatRoughness: 0.02 + Math.random() * 0.02,
-    envMapIntensity: 2.5,
+    envMapIntensity: 3.5,  // 코히어런트 env맵으로 더 높은 캐치라이트 가능
   });
 }
 
@@ -50,8 +62,10 @@ function createWhiteKeyMaterial(keyIndex) {
 
   return new THREE.MeshPhysicalMaterial({
     color,
-    emissive: 0xffffff,
-    emissiveIntensity: 0.06,
+    // 상시 emissive 제거 — clearcoat 스페큘러가 흰건반 광택 담당
+    // 상시 emissive는 블룸 위로 번져 idle/active 건반 대비를 죽임
+    emissive: 0x000000,
+    emissiveIntensity: 0.0,
     roughness,
     metalness: 0.0,
     reflectivity: 1.0,
@@ -66,11 +80,14 @@ export function createPiano(scene) {
   keys.length = 0;
   Object.keys(activeKeys).forEach(k => delete activeKeys[k]);
 
-  const whiteKeyGeo = new THREE.BoxGeometry(
-    PIANO.WHITE_KEY_WIDTH, PIANO.WHITE_KEY_HEIGHT, PIANO.WHITE_KEY_DEPTH
+  // RoundedBoxGeometry — 그레이징 앵글 조명에서 부드러운 하이라이트 모서리
+  const whiteKeyGeo = new RoundedBoxGeometry(
+    PIANO.WHITE_KEY_WIDTH, PIANO.WHITE_KEY_HEIGHT, PIANO.WHITE_KEY_DEPTH,
+    2, 0.02  // segments=2, radius=0.02
   );
-  const blackKeyGeo = new THREE.BoxGeometry(
-    PIANO.BLACK_KEY_WIDTH, PIANO.BLACK_KEY_HEIGHT, PIANO.BLACK_KEY_DEPTH
+  const blackKeyGeo = new RoundedBoxGeometry(
+    PIANO.BLACK_KEY_WIDTH, PIANO.BLACK_KEY_HEIGHT, PIANO.BLACK_KEY_DEPTH,
+    2, 0.015
   );
 
   let whiteIndex = 0;
@@ -93,7 +110,9 @@ export function createPiano(scene) {
       // per-key 색상/roughness 변화
       const mat = createBlackKeyMaterial(blackIndex++);
       const mesh = new THREE.Mesh(blackKeyGeo, mat);
-      const x = (whiteIndex - 26 - 0.5) * (PIANO.WHITE_KEY_WIDTH + PIANO.KEY_GAP);
+      const chromaticPos = midiNote % 12;
+      const offset = BLACK_KEY_OFFSETS[chromaticPos] || -0.5;
+      const x = (whiteIndex - 26 + offset) * (PIANO.WHITE_KEY_WIDTH + PIANO.KEY_GAP);
       mesh.position.set(x, PIANO.BLACK_KEY_HEIGHT / 2, -0.25);
       mesh.castShadow = true;
       mesh.receiveShadow = true;
@@ -111,7 +130,9 @@ export function createPiano(scene) {
       keyWidthLookup[mn] = PIANO.WHITE_KEY_WIDTH;
       wi++;
     } else {
-      keyXLookup[mn] = (wi - 26 - 0.5) * (PIANO.WHITE_KEY_WIDTH + PIANO.KEY_GAP);
+      const cp = mn % 12;
+      const bkOffset = BLACK_KEY_OFFSETS[cp] || -0.5;
+      keyXLookup[mn] = (wi - 26 + bkOffset) * (PIANO.WHITE_KEY_WIDTH + PIANO.KEY_GAP);
       keyWidthLookup[mn] = PIANO.BLACK_KEY_WIDTH;
     }
   }
@@ -129,11 +150,9 @@ function easeOutCubic(t) {
   return 1 - Math.pow(1 - t, 3);
 }
 
-// 부드러운 복귀: easeInOutCubic (시작과 끝 모두 부드럽게)
-function easeInOutCubic(t) {
-  return t < 0.5
-    ? 4 * t * t * t
-    : 1 - Math.pow(-2 * t + 2, 3) / 2;
+// 복귀: easeOutQuart — 빠른 초기 복귀 + 부드럽게 안착 (실제 피아노 키 물리)
+function easeOutQuart(t) {
+  return 1 - Math.pow(1 - t, 4);
 }
 
 export function pressKey(midiNote, color) {
@@ -178,18 +197,19 @@ export function pressKey(midiNote, color) {
     }
   }
 
-  // --- 복귀 애니메이션 (easeInOutCubic) ---
+  // --- 복귀 애니메이션 (easeOutQuart — 빠른 초기 복귀) ---
   function animateRelease(timestamp) {
     if (!startTime) startTime = timestamp;
     const elapsed = timestamp - startTime;
     const progress = Math.min(elapsed / RELEASE_DURATION, 1);
-    const eased = easeInOutCubic(progress);
+    const eased = easeOutQuart(progress);
 
     // 위치/회전 복귀
     key.mesh.position.y = key.baseY - PRESS_DEPTH * (1 - eased);
     key.mesh.rotation.x = -PRESS_ROTATION * (1 - eased);
-    // emissive 글로우 부드럽게 페이드아웃
-    key.mesh.material.emissiveIntensity = 2.5 * (1 - eased);
+    // 글로우 빠르게 차단 (40% 시점에 완전 소멸) — 기계적 복귀와 분리
+    const glowProgress = Math.min(progress / 0.4, 1.0);
+    key.mesh.material.emissiveIntensity = 2.5 * (1.0 - glowProgress);
 
     if (progress < 1) {
       activeAnimations.set(midiNote, requestAnimationFrame(animateRelease));

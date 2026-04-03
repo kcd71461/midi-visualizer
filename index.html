@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400&display=swap" rel="stylesheet">
   <title>3D MIDI Visualizer</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -68,7 +69,7 @@
     #progress-bar-container.hidden { display: none; }
     #progress-bar {
       height: 100%;
-      background: linear-gradient(90deg, #4ecdc4, #a78bfa);
+      background: linear-gradient(90deg, #6dd5fa, #8b9cf4);
       width: 0%;
       transition: width 0.1s linear;
     }
@@ -79,30 +80,49 @@
       font-family: monospace; font-size: 0.75rem;
     }
 
-    /* 시네마틱 자막 */
+    /* 시네마틱 타이틀 카드 — 프리미엄 세리프 + 입체적 등장 애니메이션 */
     #cinematic-title {
       position: fixed;
-      bottom: 10%;
+      bottom: 8%;
       left: 0; right: 0;
       text-align: center;
-      font-family: 'Georgia', 'Times New Roman', serif;
-      font-size: 2rem;
-      font-weight: 300;
-      letter-spacing: 6px;
-      color: rgba(255, 255, 255, 0.9);
-      text-shadow: 0 0 30px rgba(78, 205, 196, 0.4), 0 0 60px rgba(167, 139, 250, 0.2);
-      opacity: 0;
-      transition: opacity 2s ease;
+      font-family: 'Cormorant Garamond', 'Garamond', 'Times New Roman', serif;
       pointer-events: none;
       z-index: 40;
     }
-    #cinematic-title.visible { opacity: 1; }
-    #cinematic-title .subtitle {
+    #cinematic-title .piece-title {
       display: block;
-      font-size: 0.9rem;
-      letter-spacing: 3px;
-      margin-top: 8px;
-      color: rgba(255, 255, 255, 0.5);
+      font-size: clamp(1.8rem, 4vw, 3.2rem);
+      font-weight: 300;
+      letter-spacing: 0.25em;
+      color: rgba(255, 252, 245, 0.95);
+      text-shadow:
+        0 0 40px rgba(139, 156, 244, 0.25),
+        0 0 80px rgba(196, 168, 255, 0.12),
+        0 2px 4px rgba(0,0,0,0.8);
+      opacity: 0;
+      transform: translateY(6px);
+      transition: opacity 1.8s cubic-bezier(0.16, 1, 0.3, 1),
+                  transform 1.8s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    #cinematic-title .composer-name {
+      display: block;
+      font-family: 'Cormorant Garamond', 'Garamond', serif;
+      font-size: clamp(0.7rem, 1.2vw, 0.9rem);
+      font-weight: 400;
+      letter-spacing: 0.45em;
+      text-transform: uppercase;
+      color: rgba(200, 195, 185, 0.6);
+      margin-top: 10px;
+      opacity: 0;
+      transform: translateY(4px);
+      transition: opacity 1.8s cubic-bezier(0.16, 1, 0.3, 1) 0.4s,
+                  transform 1.8s cubic-bezier(0.16, 1, 0.3, 1) 0.4s;
+    }
+    #cinematic-title.visible .piece-title,
+    #cinematic-title.visible .composer-name {
+      opacity: 1;
+      transform: translateY(0);
     }
   </style>
 </head>

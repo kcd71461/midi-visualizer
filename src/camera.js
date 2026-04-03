@@ -10,14 +10,14 @@ let freeMode = false;
 let cinematicEnabled = false;
 
 // ── 인트로 / 아웃트로 상태 ──
-const INTRO_DURATION = 5.0;   // 이전: 3.0 → 5.0 (여유로운 달리 백)
+const INTRO_DURATION = 6.0;
 const OUTRO_DURATION = 3.0;
-// 인트로: 건반 바로 앞 저앙각에서 시작 (첫 프레임부터 건반이 꽉 차게)
-const introStartPos = new THREE.Vector3(0, 1.5, 5);
-const introStartTarget = new THREE.Vector3(0, 0.1, 0);
-// 인트로 종착점
-const introEndPos = new THREE.Vector3(5, 3, 12);
-const introEndTarget = new THREE.Vector3(0, 0.1, -1);
+// 인트로: God's Eye 확립 숏 → 낮은 앵글 시네마틱 포지션으로 하강
+// "오, 피아노다" 모먼트를 만드는 넓은 시작 → 친밀한 끝
+const introStartPos = new THREE.Vector3(0, 14, 22);
+const introStartTarget = new THREE.Vector3(0, 0, -2);
+const introEndPos = new THREE.Vector3(3, 3.5, 13);
+const introEndTarget = new THREE.Vector3(0, 0.2, -1);
 
 let outroActive = false;
 let outroStartTime = 0;
@@ -96,7 +96,7 @@ const cinematicPaths = [
         position: new THREE.Vector3(
           Math.sin(angle) * radius,
           height,
-          Math.abs(Math.cos(angle)) * radius + 4  // abs로 Z 항상 양수, +4 오프셋
+          (Math.cos(angle) * 0.5 + 0.5) * radius + 4  // C2 연속 — V자 불연속 제거
         ),
         target: new THREE.Vector3(0, 0.1, -1),
       };
@@ -115,10 +115,23 @@ const cinematicPaths = [
   },
 ];
 
-// ── 에너지 기반으로 적절한 경로 인덱스 선택 ──
-function selectPathIndex(currentTime, musicEnergy) {
-  // 곡 초반 10초: 하강 경로
+// ── 숏 홀드 타임 — 경로 전환 후 최소 유지 시간 (잦은 전환 방지) ──
+let lastPathSwitchTime = 0;
+const MIN_SHOT_HOLD = 4.0;
+
+// ── 곡 위치 + 에너지 기반 2축 경로 선택 ──
+function selectPathIndex(currentTime, musicEnergy, songDuration) {
+  // 최소 홀드 타임 미달이면 현재 경로 유지
+  if (currentTime - lastPathSwitchTime < MIN_SHOT_HOLD) return currPathIndex;
+
+  const songProgress = songDuration > 0 ? currentTime / songDuration : 0;
+
+  // 곡 초반 10초: 하강 경로 (인트로 직후 전환 숏)
   if (currentTime < 10) return 1;
+  // 아웃트로 구간 (곡의 마지막 15%): 멀리서 전체를 보는 차분한 뷰
+  if (songProgress > 0.85) return 3;
+  // 클라이맥스 직전 (60~80%) + 에너지 낮음: 의도적 친밀한 클로즈업
+  if (songProgress > 0.6 && songProgress < 0.8 && musicEnergy < 0.35) return 0;
   // 에너지 0.6 이상: 활발한 경로
   if (musicEnergy >= 0.6) return 2;
   // 에너지 0.25 이하: 차분한 경로
@@ -224,7 +237,7 @@ export function isCinematicMode() {
  * @param {number} musicEnergy  - 0~1 사이의 음악 에너지 (활성 노트 비율)
  * @param {number} delta        - 프레임 시간 (초)
  */
-export function updateCinematicCamera(currentTime, musicEnergy, delta = 0.016) {
+export function updateCinematicCamera(currentTime, musicEnergy, delta = 0.016, songDuration = 0) {
   if (!cinematicEnabled || !camera) return;
 
   // ── 아웃트로 시퀀스 — 크레인 업 + 풀백 (피아노가 점점 작아지는 영화적 엔딩) ──
@@ -246,17 +259,17 @@ export function updateCinematicCamera(currentTime, musicEnergy, delta = 0.016) {
     return;
   }
 
-  // ── 인트로 시퀀스 (0~5초) — 건반 클로즈업에서 달리 백 ──
+  // ── 인트로 시퀀스 (0~6초) — God's Eye 확립 숏에서 시네마틱 포지션으로 하강 ──
   if (currentTime < INTRO_DURATION) {
     const t = THREE.MathUtils.clamp(currentTime / INTRO_DURATION, 0, 1);
 
-    if (t < 0.15) {
-      // 0~0.75초: 건반 클로즈업 정지 (첫 프레임부터 건반이 화면에 꽉 참)
+    if (t < 0.08) {
+      // 처음 0.5초: 확립 숏 홀드 — 타이틀이 깨끗한 구도 위에 표시
       cinematicPos.copy(introStartPos);
       cinematicTarget.copy(introStartTarget);
     } else {
-      // 0.75~5초: 건반에서 천천히 빠지는 달리 백
-      const pullT = (t - 0.15) / 0.85;
+      // 0.5~6초: 피아노를 향해 느리고 의도적인 하강
+      const pullT = (t - 0.08) / 0.92;
       const pulledEased = easeInOutCubic(pullT);
       cinematicPos.lerpVectors(introStartPos, introEndPos, pulledEased);
       cinematicTarget.lerpVectors(introStartTarget, introEndTarget, pulledEased);
@@ -270,16 +283,16 @@ export function updateCinematicCamera(currentTime, musicEnergy, delta = 0.016) {
 
   const energy = THREE.MathUtils.clamp(musicEnergy, 0, 1);
 
-  // 적절한 경로 선택
-  const desiredIndex = selectPathIndex(currentTime, energy);
+  // 적절한 경로 선택 (곡 위치 + 에너지 2축)
+  const desiredIndex = selectPathIndex(currentTime, energy, songDuration);
 
-  // 경로가 바뀌면 전환 시작
+  // 경로가 바뀌면 전환 시작 + 홀드 타임 리셋
   if (desiredIndex !== currPathIndex) {
+    lastPathSwitchTime = currentTime;
     prevPathIndex = currPathIndex;
     currPathIndex = desiredIndex;
     pathTransitionTime = currentTime;
     pathBlend = 0;
-    // 에너지가 높을수록 전환이 약간 빠름
     pathTransitionDur = 2.0 - energy * 0.8;
   }
 
@@ -321,12 +334,15 @@ export function updateCinematicCamera(currentTime, musicEnergy, delta = 0.016) {
   prevEnergy = energy;
 
   if (energyDelta > 0.15) {
-    // 에너지 급상승 → 줌인 임펄스 (카메라가 피아노 쪽으로 당겨짐)
-    impulseOffset.set(0, -0.1, -energyDelta * 3);
+    // 공격: 세게 당기고 위로 리프트 + 약간의 랜덤 측면 흔들림
+    impulseOffset.set(
+      (Math.random() - 0.5) * 0.3,
+      0.2,
+      -energyDelta * 6  // 이전 3→6: 실제 체감되는 수준
+    );
     impulseDecay = 1.0;
   } else if (energyDelta < -0.2) {
-    // 에너지 급하락 → 풀백 임펄스 (공간감 확장)
-    impulseOffset.set(0, 0.15, -energyDelta * 2);
+    impulseOffset.set(0, -0.1, -energyDelta * 3);
     impulseDecay = 1.0;
   }
 
@@ -337,15 +353,20 @@ export function updateCinematicCamera(currentTime, musicEnergy, delta = 0.016) {
 
   const impulseEased = impulseDecay * impulseDecay; // quadratic falloff
 
-  // 카메라 브리딩 — 미세한 사인파 진동으로 생동감 부여
-  const breathX = Math.sin(currentTime * 0.7) * 0.03;
-  const breathY = Math.sin(currentTime * 0.5 + 1.0) * 0.02;
+  // 카메라 브리딩 — 에너지에 비례하는 진폭 (음악적 호흡)
+  const breathAmp = 0.04 + energy * 0.08;
+  const breathX = Math.sin(currentTime * 0.7) * breathAmp;
+  const breathY = Math.sin(currentTime * 0.5 + 1.0) * breathAmp * 0.6;
 
-  // 카메라에 적용 (위치 + 브리딩 + 임펄스)
+  // 비트 임펄스 — 스무딩 바이패스, 카메라에 직접 적용
+  const beatX = impulseOffset.x * impulseEased;
+  const beatY = impulseOffset.y * impulseEased;
+  const beatZ = impulseOffset.z * impulseEased;
+
   camera.position.set(
-    cinematicPos.x + breathX + impulseOffset.x * impulseEased,
-    cinematicPos.y + breathY + impulseOffset.y * impulseEased,
-    cinematicPos.z + impulseOffset.z * impulseEased
+    cinematicPos.x + breathX + beatX,
+    cinematicPos.y + breathY + beatY,
+    cinematicPos.z + beatZ
   );
   camera.lookAt(cinematicTarget);
 

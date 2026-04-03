@@ -73,12 +73,29 @@ function setState(newState) {
   state.current = newState;
 }
 
-function showCinematicTitle(title) {
+// 곡 메타데이터 — 시네마틱 타이틀에 작곡가/곡명 표시
+const SONG_METADATA = {
+  'chopin-nocturne-op9-no2': { title: 'Nocturne Op. 9, No. 2', composer: 'Frédéric Chopin' },
+  'moonlight-sonata':        { title: 'Sonata No. 14 "Moonlight"', composer: 'Ludwig van Beethoven' },
+  'fur-elise':               { title: 'Für Elise', composer: 'Ludwig van Beethoven' },
+  'pachelbel-canon':          { title: 'Canon in D', composer: 'Johann Pachelbel' },
+  'summer':                   { title: 'Summer', composer: 'Joe Hisaishi' },
+  'mozart-alla-turca':        { title: 'Alla Turca', composer: 'Wolfgang Amadeus Mozart' },
+};
+
+function showCinematicTitle(urlOrName) {
   const el = document.getElementById('cinematic-title');
   if (!el) return;
-  el.innerHTML = `${title}<span class="subtitle">3D MIDI Visualizer</span>`;
-  el.classList.add('visible');
-  setTimeout(() => el.classList.remove('visible'), 5000);
+  const key = Object.keys(SONG_METADATA).find(k => urlOrName.includes(k));
+  const meta = SONG_METADATA[key] || { title: urlOrName, composer: '' };
+  el.innerHTML = `
+    <span class="piece-title">${meta.title}</span>
+    ${meta.composer ? `<span class="composer-name">${meta.composer}</span>` : ''}
+  `;
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => el.classList.add('visible'));
+  });
+  setTimeout(() => el.classList.remove('visible'), 6000);
 }
 
 function getNoteHitCallback() {
@@ -222,10 +239,10 @@ function init() {
 
     handleFileLoaded({ type: 'url', url: defaultMidi }).then(() => {
       if (state.midiData) {
-        showCinematicTitle(state.midiData.name || 'Chopin Nocturne Op.9 No.2');
+        showCinematicTitle(defaultMidi);
       }
-      // 3초 후 자동 재생 시작 (인트로 시퀀스 대기)
-      setTimeout(() => togglePlayPause(), 3000);
+      // 2초 후 자동 재생 — 인트로 카메라 하강 중 첫 음이 울리도록
+      setTimeout(() => togglePlayPause(), 2000);
     });
 
   } else {
@@ -296,18 +313,34 @@ function animate() {
     updateDynamicBloom(smoothedEnergy);
     updateDynamicLighting(smoothedEnergy);
 
-    // 동적 DOF — 카메라에서 피아노까지 실거리에 초점 맞춤
+    // 내러티브 DOF — 인트로/클라이맥스/아웃트로별 다른 조리개
     if (getCinematicCameraMode()) {
       const distToPiano = camera.position.length();
-      updateDOF(distToPiano * 0.95);
+      let targetAperture;
+      if (isOutroPlaying()) {
+        // 아웃트로: 피아노가 은은한 글로잉 스팟으로
+        targetAperture = 0.001 + (distToPiano / 30) * 0.003;
+      } else if (t < 6.0) {
+        // 인트로: 얕은 심도 보케
+        targetAperture = 0.002;
+      } else if (smoothedEnergy > 0.6) {
+        // 클라이맥스: 팬포커스 (선명)
+        targetAperture = 0.0002;
+      } else if (smoothedEnergy < 0.25) {
+        // 차분: 배경 아웃포커스
+        targetAperture = 0.0006;
+      } else {
+        targetAperture = 0.0003;
+      }
+      updateDOF(distToPiano * 0.92, targetAperture);
     }
 
     // God Rays 광원 위치를 카메라 기준으로 갱신
     updateGodRaysLightPosition(camera);
 
-    // 카메라 업데이트
+    // 카메라 업데이트 (곡 길이 전달 — 곡 위치 기반 드라마틱 아크)
     if (getCinematicCameraMode()) {
-      updateCinematicCamera(t, smoothedEnergy, delta);
+      updateCinematicCamera(t, smoothedEnergy, delta, state.midiData?.duration ?? 0);
     } else {
       updateCamera();
     }
