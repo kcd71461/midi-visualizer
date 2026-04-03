@@ -41,7 +41,8 @@ function createBlackKeyMaterial(keyIndex) {
 
   return new THREE.MeshPhysicalMaterial({
     color,
-    // emissive 제거: clearcoat 반사 콘트라스트 극대화 (칠흑 위 선명한 catchlight)
+    emissive: 0x000000,           // pressKey에서 동적으로 설정
+    emissiveIntensity: 0.0,       // 대기 상태에서 0 — clearcoat 콘트라스트 유지
     roughness,
     metalness: 0.0,
     reflectivity: 1.0,

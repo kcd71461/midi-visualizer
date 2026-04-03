@@ -187,25 +187,30 @@ export function updateNotePositions(currentTime) {
 
       // ── 노트 비행 중 애니메이션 ──
       const timeToHit = note.time - currentTime;
-      const proximity = lookAhead > 0 ? 1 - Math.max(0, timeToHit) / lookAhead : 1; // 0→1 as approaching hit
+      const proximity = lookAhead > 0 ? 1 - Math.max(0, timeToHit) / lookAhead : 1;
 
-      // 근접 시 Y 스케일 팽창 (존재감 증가) — 0.8→1.0 범위
-      const scaleY = 0.8 + proximity * 0.2;
+      // 근접 시 Y 스케일 팽창 — 멀리서 납작→가까이서 풍성 (체감 가능한 범위)
+      const scaleY = 0.5 + proximity * 0.5;
 
-      // 히트 직전 0.3초: 글로우 증폭 — 관객의 시선 집중
-      let glowBoost = 1.0;
-      if (timeToHit >= 0 && timeToHit < 0.3) {
-        glowBoost = 1.0 + 0.5 * Math.pow(1 - timeToHit / 0.3, 2);
+      // Z축 스트레치: 가까울수록 약간 늘어남 (속도감)
+      const depthStretch = depth * (1.0 + proximity * 0.15);
+
+      // 히트 직전 0.4초: 밝기 램프업 — 건반에 도달하며 빛남
+      let brightnessMul = 0.4 + proximity * 0.4; // 0.4→0.8 기본 밝기 그라데이션
+      if (timeToHit >= 0 && timeToHit < 0.4) {
+        const hitT = 1 - timeToHit / 0.4;
+        brightnessMul += 0.2 * hitT * hitT; // 추가 +0.2 부스트
       }
 
-      dummy.position.set(x, NOTE_Y, z - depth / 2);
-      dummy.scale.set(width, scaleY, depth);
+      dummy.position.set(x, NOTE_Y, z - depthStretch / 2);
+      dummy.scale.set(width, scaleY, depthStretch);
       dummy.updateMatrix();
       trackMesh.instancedMesh.setMatrixAt(instanceIndex, dummy.matrix);
 
-      // velocity 기반 밝기 + 근접 글로우 부스트
+      // velocity + 근접 기반 밝기 (클램핑 전에 0~1 범위 유지)
+      const velBrightness = 0.5 + note.velocity * 0.5;
       tempColor.setHex(trackMesh.color);
-      tempColor.multiplyScalar((0.5 + note.velocity * 0.5) * glowBoost);
+      tempColor.multiplyScalar(velBrightness * brightnessMul);
       trackMesh.instancedMesh.setColorAt(instanceIndex, tempColor);
 
       instanceIndex++;
